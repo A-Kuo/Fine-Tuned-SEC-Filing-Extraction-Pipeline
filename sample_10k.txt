@@ -1,0 +1,23 @@
+SEC FILING - FORM 10-Q
+
+Registrant: Berkshire Hathaway Inc. (Ticker: BRK)
+Filing Date: 2023-11-07
+Period of Report: September 08, 2023
+CIK: 3530567
+
+FINANCIAL HIGHLIGHTS:
+
+Revenue: $362.3 billion
+Net Income: $61.6 billion
+Total Assets: $1.1 trillion
+Total Liabilities: $583.0 billion
+Diluted EPS: $13.19
+Shares Outstanding: 9.70 billion
+
+Founded in 1905, the Company has grown to become one of the largest Financials firms globally.
+
+RISK FACTORS:
+Changes in tax regulations across jurisdictions in which we operate could materially impact our financial results.
+Foreign currency fluctuations may materially impact our reported financial results.
+Regulatory changes in key markets could require significant operational adjustments.
+Cybersecurity threats pose a significant risk to our operations, customer data, and reputation.

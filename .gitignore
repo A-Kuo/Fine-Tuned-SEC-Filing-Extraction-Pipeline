@@ -1,0 +1,49 @@
+# ─── Python ──────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+
+# ─── Virtual Environments ────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+
+# ─── IDE ─────────────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ─── Testing ─────────────────────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+.ruff_cache/
+.mypy_cache/
+
+# ─── Project Artifacts ───────────────────────────────────────────────────────
+# Model weights (large binary files)
+models/**/*.bin
+models/**/*.safetensors
+models/**/*.pt
+models/**/*.onnx
+
+# Generated data (reproducible via scripts)
+data/*.jsonl
+data/*.txt
+data/*.json
+
+# Results (reproducible via evaluation)
+results/
+
+# ─── Secrets ─────────────────────────────────────────────────────────────────
+.env
+
+# ─── OS ──────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db

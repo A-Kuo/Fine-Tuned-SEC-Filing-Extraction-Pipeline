@@ -1,0 +1,95 @@
+# ============================================================
+# Financial LLM Configuration
+# ============================================================
+
+model:
+  base_model: "meta-llama/Llama-3.1-8B"
+  adapter_path: "models/llama-sec-v1"
+  max_seq_length: 2048
+  dtype: "float16"
+
+quantization:
+  load_in_4bit: true
+  bnb_4bit_compute_dtype: "float16"
+  bnb_4bit_quant_type: "nf4"
+  bnb_4bit_use_double_quant: true
+
+lora:
+  r: 16
+  lora_alpha: 32
+  lora_dropout: 0.05
+  target_modules:
+    - "q_proj"
+    - "k_proj"
+    - "v_proj"
+    - "o_proj"
+    - "gate_proj"
+    - "up_proj"
+    - "down_proj"
+  task_type: "CAUSAL_LM"
+
+training:
+  num_epochs: 3
+  batch_size: 8
+  gradient_accumulation_steps: 4
+  learning_rate: 5.0e-4
+  weight_decay: 0.01
+  warmup_ratio: 0.03
+  lr_scheduler_type: "cosine"
+  max_grad_norm: 1.0
+  logging_steps: 10
+  save_steps: 200
+  eval_steps: 100
+  fp16: true
+  seed: 42
+  output_dir: "models/llama-sec-v1"
+
+serving:
+  host: "0.0.0.0"
+  port: 8000
+  max_batch_size: 32
+  max_concurrent_requests: 64
+  timeout_seconds: 30
+  max_tokens: 512
+
+database:
+  postgres:
+    host: "localhost"
+    port: 5432
+    user: "finllm"
+    password: "finllm_dev"
+    database: "financial_llm"
+  redis:
+    host: "localhost"
+    port: 6379
+    db: 0
+    cache_ttl_seconds: 86400  # 1 day
+
+monitoring:
+  accuracy_threshold: 0.92
+  latency_p99_threshold_ms: 1200
+  daily_sample_size: 50
+  alert_email: ""
+  drift_check_interval_hours: 24
+
+data:
+  train_path: "data/sec_filings_train.jsonl"
+  test_path: "data/sec_filings_test.jsonl"
+  sample_path: "data/sample_10k.txt"
+  max_train_samples: null  # null = use all
+  max_eval_samples: 500
+
+extraction:
+  required_fields:
+    - "filing_id"
+    - "company_name"
+    - "filing_type"
+    - "date"
+  optional_fields:
+    - "revenue"
+    - "net_income"
+    - "total_assets"
+    - "total_liabilities"
+    - "eps"
+  confidence_threshold: 0.7
+  fallback_on_validation_failure: true
