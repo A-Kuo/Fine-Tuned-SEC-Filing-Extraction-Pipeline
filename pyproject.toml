@@ -1,0 +1,53 @@
+[project]
+name = "financial-llm"
+version = "0.1.0"
+description = "SEC Filing Extraction via QLoRA Fine-Tuned Llama 3.1"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [
+    {name = "Austin Kuo"},
+]
+keywords = ["llm", "qlora", "sec-filings", "nlp", "fine-tuning", "financial-extraction"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+[project.urls]
+Repository = "https://github.com/akuo6/financial-llm"
+
+# ─── Tool Configuration ─────────────────────────────────────────────────────
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+ignore = [
+    "E501",  # Line length handled by formatter
+    "N802",  # Function name lowercase (allow test methods)
+    "N803",  # Argument name lowercase (allow math notation like B, A)
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["src", "serving", "monitoring", "evaluation"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
