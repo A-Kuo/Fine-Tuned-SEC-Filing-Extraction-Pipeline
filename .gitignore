@@ -27,19 +27,17 @@ htmlcov/
 .mypy_cache/
 
 # ─── Project Artifacts ───────────────────────────────────────────────────────
-# Model weights (large binary files)
-models/**/*.bin
-models/**/*.safetensors
-models/**/*.pt
-models/**/*.onnx
-
-# Generated data (reproducible via scripts)
-data/*.jsonl
-data/*.txt
-data/*.json
-
-# Results (reproducible via evaluation)
+# Model weights and checkpoints (large binary files)
+models/
+!models/.gitkeep
 results/
+!results/.gitkeep
+
+# Generated data (reproducible via scripts/download_dataset.py + format_data.py)
+data/*.jsonl
+# Keep sample reference files
+!data/sample_10k.txt
+!data/sample_10k.expected.json
 
 # ─── Secrets ─────────────────────────────────────────────────────────────────
 .env
