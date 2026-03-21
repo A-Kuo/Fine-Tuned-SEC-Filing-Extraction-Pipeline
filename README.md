@@ -1,267 +1,270 @@
-# Financial LLM: SEC Filing Extraction via QLoRA Fine-Tuning
+# FinDocAnalyzer
 
-Production-grade system for extracting structured financial data from SEC filings using a fine-tuned Llama 3.1 8B model with QLoRA (Quantized Low-Rank Adaptation).
+**SEC Filing Extraction Pipeline — QLoRA Fine-Tuned Llama 3.1 8B**
+
+[![CI](https://github.com/akuo6/financial-llm/actions/workflows/ci.yml/badge.svg)](https://github.com/akuo6/financial-llm/actions/workflows/ci.yml)
+[![Python](https://img.shields.io/badge/python-3.10%20|%203.11%20|%203.12-blue)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+Production system for extracting structured financial data from SEC 10-K/10-Q/8-K filings using a domain-adapted LLM. Fine-tunes Llama 3.1 8B with QLoRA (4-bit quantization + LoRA adapters), serving predictions through a FastAPI REST layer backed by Redis + PostgreSQL.
 
 ---
 
-## Key Results
+## Performance
 
-| Metric | Value |
-|--------|-------|
-| Extraction Accuracy | 94% (fully correct extractions) |
-| Field-Level Accuracy | 92–99% per field |
-| Memory Footprint | 7.2 GB (vs 32 GB FP32, **77% reduction**) |
-| Inference Latency (p50) | ~320 ms/doc |
-| Throughput | ~60 docs/min |
-| Cost per Document | ~$0.003 (vs $0.50 GPT-4, **167x cheaper**) |
-| Trainable Parameters | ~200M / 8B (**2.5%** of total) |
+| Metric | Value | Baseline |
+|---|---|---|
+| Extraction Accuracy | 94% (fully correct JSON outputs) | |
+| Field-Level Accuracy | 92–99% per field | |
+| Inference Latency (p50) | ~320 ms/doc | |
+| Throughput | ~60 docs/min | |
+| Memory Footprint | 7.2 GB (NF4 4-bit) | 32 GB for same Llama 8B model at FP32 (77% reduction) |
+| Trainable Parameters | ~200M / 8B total (2.5%) | |
+| Cost per Document | ~$0.003 self-hosted | ~$0.50 via GPT-4 API (167x reduction) |
 
 ---
 
 ## Architecture
 
 ```
-SEC Filing Text ──┐
-                  ▼
-         ┌─────────────────┐
-         │  Prompt Builder  │   Llama 3.1 chat template
-         │  (chat format)   │   with system + extraction instruction
-         └────────┬────────┘
-                  ▼
-         ┌─────────────────┐
-         │  Llama 3.1 8B   │   Frozen weights in NF4 (4-bit)
-         │  + LoRA Adapters │   BA matrices: r=16, α=32
-         │  (QLoRA)         │   Targets: q/k/v/o_proj, gate/up/down_proj
-         └────────┬────────┘
-                  ▼
-         ┌─────────────────┐
-         │  JSON Parser     │   5-strategy robust parser
-         │  + Validator     │   Handles truncation, fences, malformed output
-         └────────┬────────┘
-                  ▼
-         ┌─────────────────┐
-         │  Redis Cache     │──→  1ms reads, 1-day TTL
-         │  + PostgreSQL    │──→  Persistent storage, audit trail
-         └────────┬────────┘
-                  ▼
-         ┌─────────────────┐
-         │  Monitoring      │   Drift detection (z-test), latency SLAs
-         │  + Alerting      │   Automated alerts on degradation
-         └─────────────────┘
+SEC Filing Text
+      │
+      ▼
+┌─────────────────┐
+│  Prompt Builder  │  Llama 3.1 chat template (system + extraction instruction)
+└────────┬────────┘
+         ▼
+┌─────────────────┐
+│  Llama 3.1 8B   │  NF4 4-bit frozen weights
+│  + LoRA Adapters│  r=16, α=32 — q/k/v/o/gate/up/down_proj
+└────────┬────────┘
+         ▼
+┌─────────────────┐
+│  JSON Parser     │  5-strategy cascade (direct → strip fences →
+│  + Validator     │  regex extract → fix truncation → field-level fallback)
+└────────┬────────┘
+         ▼
+┌─────────────────┐
+│  Redis Cache     │  1ms reads, 1-day TTL (LRU, 256 MB)
+│  + PostgreSQL    │  Persistent storage + audit trail
+└────────┬────────┘
+         ▼
+┌─────────────────┐
+│  Monitoring      │  Drift detection (z-test), latency SLAs, Streamlit dashboard
+└─────────────────┘
 ```
 
-## Mathematical Foundation
-
-### QLoRA: Why It Works
-
-Standard fine-tuning updates all parameters: **W' = W + ΔW** where W ∈ ℝ^{d×k} with d·k = 8 billion parameters, requiring 32 GB in FP32.
-
-**LoRA** decomposes the update into low-rank matrices:
-
-```
-W' = W + BA    where B ∈ ℝ^{d×r}, A ∈ ℝ^{r×k}, r ≪ min(d, k)
-```
-
-With rank r=16, trainable parameters drop from d·k to r·(d+k) — roughly **200M** instead of 8B (2.5%).
-
-**QLoRA** adds 4-bit NormalFloat quantization to the frozen weights:
-
-- **W_frozen**: Stored in NF4 (4-bit), reducing 32 GB → 7.2 GB
-- **B, A adapters**: Trained in FP16 for gradient precision
-- **Double quantization**: Quantizes the quantization constants themselves for additional ~0.4 GB savings
-
-The key insight: LoRA exploits the empirical observation that weight updates during fine-tuning have low intrinsic rank. For domain-specific tasks like SEC extraction, the model only needs to learn a narrow mapping (filing text → JSON fields), which lives in a low-dimensional subspace of the full parameter space.
-
-### Drift Detection
-
-Production accuracy is monitored via a two-sample proportion z-test:
-
-```
-z = (p_current - p_baseline) / sqrt(p_pool * (1 - p_pool) * (1/n_current + 1/n_baseline))
-```
-
-An alert fires when **both** conditions hold: accuracy < threshold **and** p < 0.05. With 50 daily samples, this detects a 5% accuracy drop within 1 day at 80% power.
-
----
-
-## Quick Start
-
-### Prerequisites
-
-- Python 3.10+
-- CUDA GPU with ≥16 GB VRAM (for training/inference)
-- Docker (for PostgreSQL + Redis)
-
-### Setup
-
-```bash
-git clone https://github.com/your-username/financial-llm.git
-cd financial-llm
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Copy environment config
-cp .env.example .env
-# Edit .env with your HuggingFace token
-
-# Start infrastructure
-docker compose up -d
-
-# Initialize database
-docker exec -i financial-llm-postgres psql -U postgres -d financial_llm < scripts/init_db.sql
-
-# Generate training data
-python scripts/download_dataset.py
-python scripts/format_data.py
-
-# Run tests
-make test
-```
-
-### Training
-
-```bash
-# Download base model (requires HuggingFace access to Llama 3.1)
-python scripts/download_model.py
-
-# Fine-tune with QLoRA
-python training/train.py \
-    --num_epochs 3 \
-    --batch_size 8 \
-    --learning_rate 5e-4
-```
-
-### Inference
-
-```bash
-# Start API server
-uvicorn serving.api:app --host 0.0.0.0 --port 8000
-
-# Single extraction
-curl -X POST http://localhost:8000/extract \
-    -H "Content-Type: application/json" \
-    -d '{"text": "SEC FILING - FORM 10-K\nRegistrant: Apple Inc..."}'
-
-# Batch processing
-python serving/batch_inference.py --input_dir data/filings/ --server_url http://localhost:8000
-```
-
-### Monitoring
-
-```bash
-# Streamlit dashboard
-streamlit run monitoring/dashboard.py
-
-# CLI drift check
-python monitoring/monitor.py --full-report
-
-# Evaluate accuracy
-python evaluation/evaluate.py --predictions results/predictions.jsonl --ground_truth data/sec_filings_test.jsonl
-```
+**Extracted fields:** `filing_id`, `company_name`, `ticker`, `filing_type`, `date`, `fiscal_year_end`, `revenue`, `net_income`, `total_assets`, `total_liabilities`, `eps`, `sector`
 
 ---
 
 ## Project Structure
 
 ```
-financial-llm/
-├── config.yaml                 # Central configuration
-├── docker-compose.yml          # PostgreSQL + Redis
-├── Makefile                    # Common commands
-├── pyproject.toml              # Package metadata
+FinDocAnalyzer/
+├── config.yaml                 # Central configuration (model, training, serving, DB)
+├── docker-compose.yml          # PostgreSQL 16 + Redis 7
+├── Makefile                    # Dev/ops commands
+├── pyproject.toml              # Package metadata + ruff/mypy/pytest config
 ├── requirements.txt            # Python dependencies
 │
-├── scripts/                    # Data preparation
-│   ├── download_model.py       # Fetch Llama 3.1 from HuggingFace
-│   ├── download_dataset.py     # Generate synthetic SEC filings
-│   ├── format_data.py          # Convert to Llama chat template
-│   └── init_db.sql             # PostgreSQL schema
-│
-├── data/                       # Training & test data (generated)
-│   ├── sec_filings_train.jsonl
-│   ├── sec_filings_test.jsonl
-│   ├── sec_filings_train.chat.jsonl
-│   ├── sample_10k.txt
-│   └── sample_10k.expected.json
-│
 ├── src/                        # Core library
-│   ├── config.py               # Config loader with env overrides
-│   ├── model.py                # FinancialLLM: load quantized model + LoRA
-│   ├── inference.py            # ExtractionEngine: prompt → model → result
-│   ├── postprocessing.py       # 5-strategy JSON parser + validation
-│   └── database.py             # Redis cache + PostgreSQL storage
+│   ├── config.py               # YAML config loader with env overrides
+│   ├── model.py                # FinancialLLM: quantized base + LoRA adapter loading
+│   ├── inference.py            # ExtractionEngine: prompt → model → structured result
+│   ├── postprocessing.py       # 5-strategy JSON parser + schema validation
+│   └── database.py             # RedisCache + PostgresStorage + DatabaseManager
 │
 ├── training/                   # Fine-tuning pipeline
 │   ├── train.py                # QLoRA training with SFTTrainer
 │   ├── callbacks.py            # Metrics logging + early stopping
-│   └── data_collator.py        # Label masking (loss on output only)
+│   └── data_collator.py        # Label masking (loss computed only on output tokens)
 │
-├── serving/                    # Production serving
-│   ├── inference_server.py     # vLLM server with PagedAttention
-│   ├── api.py                  # FastAPI REST endpoints
-│   └── batch_inference.py      # Bulk processing CLI
+├── serving/                    # Production serving layer
+│   ├── api.py                  # FastAPI endpoints: /extract, /extract/batch, /health, /metrics
+│   ├── inference_server.py     # vLLM server wrapper (PagedAttention, continuous batching)
+│   └── batch_inference.py      # CLI for bulk processing from a directory of filings
 │
-├── evaluation/                 # Accuracy & performance
-│   ├── evaluate.py             # Per-field accuracy, fuzzy matching
-│   └── benchmark.py            # Latency, throughput, memory
+├── evaluation/                 # Accuracy and performance measurement
+│   ├── evaluate.py             # Per-field accuracy, fuzzy numeric matching
+│   └── benchmark.py            # Latency, throughput, memory profiling
 │
 ├── monitoring/                 # Production observability
-│   ├── monitor.py              # Drift detection (z-test)
-│   ├── alerts.py               # Alert dispatch
+│   ├── monitor.py              # Drift detection via two-sample proportion z-test
+│   ├── alerts.py               # Alert dispatch (log / email / webhook)
 │   └── dashboard.py            # Streamlit dashboard
 │
-├── tests/                      # 103 tests
-│   ├── test_postprocessing.py  # JSON parsing, validation (27 tests)
+├── scripts/                    # Data preparation and model setup
+│   ├── download_model.py       # Fetch Llama 3.1 from HuggingFace Hub
+│   ├── download_dataset.py     # Generate synthetic SEC filing training pairs
+│   ├── format_data.py          # Convert to Llama 3.1 chat template format
+│   └── init_db.sql             # PostgreSQL schema (extractions + audit log tables)
+│
+├── tests/                      # 103 tests, no GPU required
+│   ├── test_postprocessing.py  # JSON parsing and validation (27 tests)
 │   ├── test_database.py        # Cache, storage, graceful degradation (19 tests)
 │   ├── test_api.py             # REST schemas, prompt building (13 tests)
-│   ├── test_monitoring.py      # Drift detection, evaluation (24 tests)
-│   └── test_integration.py     # End-to-end pipeline flows (11 tests)
+│   ├── test_monitoring.py      # Drift detection, evaluation metrics (24 tests)
+│   └── test_integration.py     # End-to-end pipeline flows (11 tests) [no GPU]
 │
-├── models/                     # Saved LoRA adapters (gitignored)
+├── notebooks/                  # Colab notebooks (GPU-accelerated)
+│   ├── train_qlora.ipynb       # QLoRA fine-tuning on Colab T4/A100
+│   └── inference_eval.ipynb    # Extraction, evaluation, latency profiling
+│
+├── data/                       # Training data (generated) + reference samples
+│   ├── sample_10k.txt          # Reference SEC 10-K text for smoke testing
+│   └── sample_10k.expected.json # Expected extraction output for the sample
+│
+├── models/                     # Saved LoRA adapters (gitignored, see .gitignore)
 └── results/                    # Evaluation outputs (gitignored)
 ```
 
 ---
 
-## Design Decisions
+## GPU / Colab
 
-**QLoRA over full fine-tuning**: 77% memory reduction allows training on a single consumer GPU (RTX 4090). The 2.5% trainable parameter ratio is sufficient for domain-specific extraction where the model already understands language — it only needs to learn the mapping from SEC text to structured JSON.
+If you don't have a local CUDA GPU, use the provided Colab notebooks:
 
-**Label masking in data collator**: Cross-entropy loss is computed **only** on the assistant's JSON output tokens (IGNORE_INDEX=-100 on instruction/filing tokens). Without this, the model wastes capacity predicting SEC boilerplate instead of learning the extraction mapping.
+| Notebook | Purpose | Min GPU |
+|---|---|---|
+| [`notebooks/train_qlora.ipynb`](notebooks/train_qlora.ipynb) | QLoRA fine-tuning | T4 (16 GB) |
+| [`notebooks/inference_eval.ipynb`](notebooks/inference_eval.ipynb) | Extraction + evaluation + latency profiling | T4 (16 GB) |
 
-**5-strategy JSON parser**: LLM outputs are unpredictable — sometimes wrapped in markdown fences, sometimes truncated at max_tokens, sometimes with trailing commentary. The cascade of parse strategies (direct → strip fences → regex extract → fix truncation → field-level regex) maximizes successful extraction rate.
-
-**Greedy decoding**: `do_sample=False` ensures deterministic output — the same filing always produces the same extraction. Critical for production reproducibility and audit compliance.
-
-**Two-tier caching**: Redis (1ms) handles repeated lookups within the 1-day TTL window. PostgreSQL stores everything permanently for compliance. The read-through pattern keeps the cache transparent to callers.
-
-**Statistical drift detection**: Simple threshold checks produce false positives. The proportion z-test adds statistical rigor — an alert fires only when the accuracy drop is both meaningful (below threshold) and statistically significant (p < 0.05).
+Both notebooks auto-detect GPU tier (T4/L4/A100), configure batch sizes accordingly, and save artifacts to Google Drive for persistence. Open in Colab via **Runtime → Change runtime type → GPU**.
 
 ---
 
-## Iteration Roadmap
+## Prerequisites
 
-### Iteration 1 (Current) ✅
-- Full pipeline: data → training → inference → serving → storage → monitoring
-- 103 passing tests covering all modules
-- Synthetic SEC filings for development and testing
-- Complete API with batch support
+- Python 3.10+
+- CUDA GPU with ≥16 GB VRAM (training and inference; tests run CPU-only) — or use Colab
+- Docker (for PostgreSQL + Redis)
+- HuggingFace account with access to [meta-llama/Llama-3.1-8B](https://huggingface.co/meta-llama/Llama-3.1-8B)
 
-### Iteration 2 (Planned)
-- Real SEC filing dataset via EDGAR API
-- Hyperparameter sweep (rank, learning rate, target modules)
-- A/B testing framework for model versions
-- Grafana + Prometheus monitoring stack
+---
 
-### Iteration 3 (Planned)
+## Setup
+
+```bash
+git clone https://github.com/akuo6/financial-llm.git
+cd financial-llm
+
+pip install -r requirements.txt
+
+cp .env.example .env
+# Add your HuggingFace token to .env
+
+make infra-up       # Start PostgreSQL + Redis
+make db-init        # Initialize schema
+make data           # Generate synthetic training data
+make test           # Run 103 tests (no GPU needed)
+```
+
+---
+
+## Training
+
+```bash
+python scripts/download_model.py     # ~16 GB download, requires HF_TOKEN
+
+make train
+# Equivalent: python training/train.py --num_epochs 3 --batch_size 8 --learning_rate 5e-4
+# Output: models/llama-sec-v1/  (LoRA adapters only, ~500 MB)
+```
+
+Key training config (see `config.yaml`):
+
+| Parameter | Value | Rationale |
+|---|---|---|
+| LoRA rank | 16 | Sufficient for domain-specific extraction task |
+| LoRA alpha | 32 | 2× rank — standard scaling |
+| Target modules | q/k/v/o/gate/up/down | All linear projections |
+| Batch size | 8 × 4 grad accum = 32 effective | |
+| Learning rate | 5e-4 with cosine decay | Standard for LoRA |
+| Quantization | NF4 4-bit + double quant | 7.2 GB vs 32 GB FP32 |
+
+---
+
+## Inference
+
+```bash
+# Start API server (standalone, loads model directly)
+make serve
+
+# Single extraction
+curl -X POST http://localhost:8000/extract \
+  -H "Content-Type: application/json" \
+  -d '{"text": "SEC FILING - FORM 10-K\nRegistrant: Apple Inc..."}'
+
+# Batch processing from a directory
+python serving/batch_inference.py --input_dir data/filings/ --server_url http://localhost:8000
+
+# Production: use vLLM backend for higher throughput
+make serve-vllm &
+uvicorn serving.api:app --host 0.0.0.0 --port 8001
+```
+
+For production throughput, the vLLM backend (PagedAttention + continuous batching) handles raw inference while the FastAPI layer handles prompt construction, post-processing, caching, and monitoring.
+
+---
+
+## Monitoring
+
+```bash
+make dashboard      # Streamlit dashboard at http://localhost:8501
+make monitor        # CLI drift report
+make evaluate       # Accuracy metrics against ground truth
+make benchmark      # Latency/throughput/memory profile
+```
+
+Drift detection fires when accuracy drops below `0.92` threshold **and** the drop is statistically significant (two-sample proportion z-test, p < 0.05). With 50 daily samples, this detects a 5% absolute accuracy drop within one day at 80% statistical power.
+
+---
+
+## Development
+
+```bash
+make lint           # ruff check
+make format         # ruff format
+make typecheck      # mypy
+make test-coverage  # pytest with coverage report
+```
+
+All tests run without a GPU. The test suite mocks model inference and uses an in-memory SQLite substitute for the database layer, so CI runs fast on standard runners.
+
+---
+
+## Configuration
+
+All runtime configuration lives in `config.yaml`, with environment variable overrides via `.env`. Key sections:
+
+- **`model`** — base model path, adapter path, sequence length
+- **`quantization`** — NF4 4-bit settings
+- **`lora`** — rank, alpha, target modules
+- **`training`** — epochs, batch size, learning rate schedule
+- **`serving`** — host, port, batch size, timeouts
+- **`database`** — PostgreSQL + Redis connection params
+- **`monitoring`** — accuracy threshold, latency SLAs, alert config
+- **`extraction`** — required/optional field definitions, confidence threshold
+
+---
+
+## Roadmap
+
+**Iteration 2**
+- Real SEC filings via EDGAR full-text search API (replacing synthetic data)
+- Hyperparameter sweep: LoRA rank, learning rate, target module ablation
+- A/B testing framework for adapter version comparison
+- Prometheus metrics export + Grafana dashboards
+
+**Iteration 3**
 - Multi-GPU training with DeepSpeed ZeRO-3
-- Streaming inference for long documents
-- RLHF alignment on extraction quality
+- Streaming inference for long documents (>2048 tokens)
+- RLHF alignment using analyst-reviewed extraction pairs
 - Kubernetes deployment manifests
 
 ---
 
 ## License
 
-MIT License. See [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE).

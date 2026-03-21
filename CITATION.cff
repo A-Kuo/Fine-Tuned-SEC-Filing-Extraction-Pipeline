@@ -1,0 +1,22 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+type: software
+authors:
+  - family-names: "Kuo"
+    given-names: "Austin"
+    affiliation: "Independent Research"
+title: "FinDocAnalyzer: SEC Filing Extraction via QLoRA Fine-Tuned Llama 3.1"
+version: 0.1.0
+date-released: 2025-03-18
+url: "https://github.com/akuo6/financial-llm"
+repository-code: "https://github.com/akuo6/financial-llm"
+license: MIT
+keywords:
+  - large-language-models
+  - financial-nlp
+  - sec-filings
+  - qlora
+  - fine-tuning
+  - information-extraction
+  - llama
+abstract: "Production-grade system for extracting structured financial data from SEC 10-K/10-Q/8-K filings using a QLoRA fine-tuned Llama 3.1 8B model with 4-bit quantization. Achieves 94% extraction accuracy with 77% memory reduction compared to FP32, enabling deployment on consumer GPUs."
