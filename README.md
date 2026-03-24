@@ -160,6 +160,8 @@ make data           # Generate synthetic training data
 make test           # Run 103 tests (no GPU needed)
 ```
 
+> **Security Note:** The default `POSTGRES_PASSWORD=finllm_dev` in `docker-compose.yml` is for local development only. Override with the `POSTGRES_PASSWORD` environment variable for any non-local deployment.
+
 ---
 
 ## Training
