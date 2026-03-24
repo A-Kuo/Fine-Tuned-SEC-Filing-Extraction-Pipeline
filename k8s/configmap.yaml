@@ -1,0 +1,17 @@
+# Non-secret application settings. Mount or merge with your own config.yaml.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: findoc-config
+  namespace: findoc-analyzer
+data:
+  config.yaml: |
+    serving:
+      host: "0.0.0.0"
+      port: 8000
+    security:
+      require_api_key: true
+      cors_origins: ["*"]
+    logging:
+      format: "json"
+      level: "INFO"

@@ -124,7 +124,7 @@ FinDocAnalyzer/
 │   └── data_collator.py        # Label masking (loss computed only on output tokens)
 │
 ├── serving/                    # Production serving layer
-│   ├── api.py                  # FastAPI endpoints: /extract, /extract/batch, /health, /metrics
+│   ├── api.py                  # FastAPI: /extract, /batch, /health, /metrics (Prometheus), /stats (JSON)
 │   ├── inference_server.py     # vLLM server wrapper (PagedAttention, continuous batching)
 │   └── batch_inference.py      # CLI for bulk processing from a directory of filings
 │
@@ -159,6 +159,8 @@ FinDocAnalyzer/
 │   └── sample_10k.expected.json # Expected extraction output for the sample
 │
 ├── models/                     # Saved LoRA adapters (gitignored, see .gitignore)
+├── k8s/                        # Kubernetes manifests (namespace, deployment, HPA, ingress)
+├── helm/fin-doc-analyzer/       # Helm chart: helm install fin-doc-analyzer ./helm/fin-doc-analyzer
 └── results/                    # Evaluation outputs (gitignored)
 ```
 

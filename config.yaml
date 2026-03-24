@@ -51,6 +51,41 @@ serving:
   max_concurrent_requests: 64
   timeout_seconds: 30
   max_tokens: 512
+  # API keys (optional). When non-empty, requests must send X-API-Key matching one entry.
+  # Leave empty for local development (no auth).
+  api_keys: []
+  # Downstream services for pipeline status / circuit breaker (optional)
+  ticker_agent_url: "http://localhost:8002"
+  viz_framework_url: "http://localhost:8003"
+
+security:
+  require_api_key: false
+  rate_limit_per_minute: 100
+  cors_origins:
+    - "*"
+  # Webhook HMAC signing secret (optional; per-registration secret overrides)
+  webhook_signing_secret: ""
+
+logging:
+  format: "json"  # json | text
+  level: "INFO"
+  include_request_id: true
+
+edgar:
+  user_agent: "FinDocAnalyzer contact@example.com"
+  requests_per_second: 10
+  raw_dir: "data/raw_edgar"
+  max_filings_per_run: 100
+  forms:
+    - "10-K"
+  # Optional: restrict to these tickers; empty = use first N from SEC company list
+  tickers: []
+
+ab_test:
+  enabled: false
+  primary_model_path: "models/llama-sec-v1"
+  challenger_model_path: "models/llama-sec-v2"
+  traffic_split: 0.1  # fraction to challenger
 
 database:
   postgres:
@@ -71,6 +106,10 @@ monitoring:
   daily_sample_size: 50
   alert_email: ""
   drift_check_interval_hours: 24
+  # Prometheus Alertmanager endpoint (e.g. http://alertmanager:9093)
+  alertmanager_url: ""
+  # Slack incoming webhook URL (optional)
+  slack_webhook_url: ""
 
 data:
   train_path: "data/sec_filings_train.jsonl"

@@ -33,6 +33,9 @@ data:  ## Generate training data
 	python scripts/download_dataset.py
 	python scripts/format_data.py
 
+fetch-edgar:  ## Fetch real SEC filings (respects SEC rate limits; set EDGAR tickers in config)
+	python scripts/fetch_edgar.py
+
 # ─── Training ────────────────────────────────────────────────────────────────
 
 train:  ## Fine-tune model with QLoRA

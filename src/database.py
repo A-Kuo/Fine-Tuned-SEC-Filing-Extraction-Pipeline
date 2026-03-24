@@ -425,6 +425,224 @@ class PostgresStorage:
             self._connection.close()
             self._available = False
 
+    def log_webhook_failure(
+        self,
+        service: str,
+        target_url: str,
+        payload: dict,
+        error_message: str,
+        attempt_count: int = 0,
+    ) -> bool:
+        """Record a failed webhook delivery for retry or audit."""
+        if not self._available:
+            return False
+        try:
+            import json as _json
+
+            cur = self._connection.cursor()
+            cur.execute(
+                """
+                INSERT INTO webhook_failures (service, target_url, payload, error_message, attempt_count)
+                VALUES (%s, %s, %s, %s, %s)
+                """,
+                (service, target_url, _json.dumps(payload), error_message, attempt_count),
+            )
+            return True
+        except Exception as e:
+            logger.error(f"webhook_failures insert error: {e}")
+            return False
+
+    def record_ab_result(
+        self,
+        filing_id: str,
+        model_version: str,
+        is_challenger: bool,
+        confidence_score: float,
+        status: str,
+        latency_ms: int,
+    ) -> bool:
+        """Record A/B test assignment outcome."""
+        if not self._available:
+            return False
+        try:
+            cur = self._connection.cursor()
+            cur.execute(
+                """
+                INSERT INTO ab_test_results (filing_id, model_version, is_challenger, confidence_score, status, latency_ms)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                """,
+                (filing_id, model_version, is_challenger, confidence_score, status, latency_ms),
+            )
+            return True
+        except Exception as e:
+            logger.error(f"ab_test_results insert error: {e}")
+            return False
+
+    def upsert_pipeline_stage(self, extraction_id: str, stage: str, ticker: str | None = None) -> bool:
+        """Track pipeline stage for downstream consumers."""
+        if not self._available:
+            return False
+        try:
+            cur = self._connection.cursor()
+            cur.execute(
+                """
+                INSERT INTO pipeline_stages (extraction_id, stage, ticker, updated_at)
+                VALUES (%s, %s, %s, NOW())
+                ON CONFLICT (extraction_id) DO UPDATE SET
+                    stage = EXCLUDED.stage,
+                    ticker = COALESCE(EXCLUDED.ticker, pipeline_stages.ticker),
+                    updated_at = NOW()
+                """,
+                (extraction_id, stage, ticker),
+            )
+            return True
+        except Exception as e:
+            logger.error(f"pipeline_stages upsert error: {e}")
+            return False
+
+    def get_pipeline_stage_counts(self) -> dict[str, int]:
+        """Count rows per pipeline stage."""
+        if not self._available:
+            return {}
+        try:
+            cur = self._connection.cursor()
+            cur.execute(
+                """
+                SELECT stage, COUNT(*) FROM pipeline_stages GROUP BY stage
+                """
+            )
+            return {row[0]: row[1] for row in cur.fetchall()}
+        except Exception as e:
+            logger.error(f"pipeline_stages count error: {e}")
+            return {}
+
+    def get_daily_extraction_counts(self, days: int = 30) -> list[dict]:
+        """Time series: extractions per day (from extraction_logs)."""
+        if not self._available:
+            return []
+        try:
+            cur = self._connection.cursor()
+            cur.execute(
+                """
+                SELECT DATE(created_at) AS d,
+                       COUNT(*) FILTER (WHERE status = 'success') AS ok,
+                       COUNT(*) AS total
+                FROM extraction_logs
+                WHERE created_at > NOW() - (%s * INTERVAL '1 day')
+                GROUP BY DATE(created_at)
+                ORDER BY d ASC
+                """,
+                (days,),
+            )
+            out = []
+            for row in cur.fetchall():
+                d, ok, total = row
+                acc = ok / total if total else 0
+                out.append({
+                    "date": d.isoformat() if hasattr(d, "isoformat") else str(d),
+                    "accuracy": acc,
+                    "sample_size": total,
+                })
+            return out
+        except Exception as e:
+            logger.error(f"get_daily_extraction_counts error: {e}")
+            return []
+
+    def get_recent_extraction_logs(self, limit: int = 100) -> list[dict]:
+        """Recent extraction log rows for dashboard."""
+        if not self._available:
+            return []
+        try:
+            cur = self._connection.cursor()
+            cur.execute(
+                """
+                SELECT filing_id, status, latency_ms, model_version, created_at
+                FROM extraction_logs
+                ORDER BY created_at DESC
+                LIMIT %s
+                """,
+                (limit,),
+            )
+            cols = ["filing_id", "status", "latency_ms", "model_version", "created_at"]
+            rows = []
+            for r in cur.fetchall():
+                rows.append({
+                    cols[i]: (str(r[i]) if isinstance(r[i], datetime) else r[i])
+                    for i in range(len(cols))
+                })
+            return rows
+        except Exception as e:
+            logger.error(f"get_recent_extraction_logs error: {e}")
+            return []
+
+    def get_recent_extractions_dashboard(self, limit: int = 20) -> list[dict]:
+        """Recent rows with optional confidence from extractions join."""
+        if not self._available:
+            return []
+        try:
+            cur = self._connection.cursor()
+            cur.execute(
+                """
+                SELECT el.filing_id, el.status, el.latency_ms, el.model_version, el.created_at,
+                       e.confidence_score
+                FROM extraction_logs el
+                LEFT JOIN extractions e ON e.filing_id = el.filing_id
+                ORDER BY el.created_at DESC
+                LIMIT %s
+                """,
+                (limit,),
+            )
+            cols = [
+                "filing_id",
+                "status",
+                "latency_ms",
+                "model_version",
+                "created_at",
+                "confidence_score",
+            ]
+            rows = []
+            for r in cur.fetchall():
+                rows.append({
+                    cols[i]: (str(r[i]) if isinstance(r[i], datetime) else r[i])
+                    for i in range(len(cols))
+                })
+            return rows
+        except Exception as e:
+            logger.error(f"get_recent_extractions_dashboard error: {e}")
+            return []
+
+    def get_ab_summary(self) -> list[dict]:
+        """Per-model-version aggregates for A/B reporting."""
+        if not self._available:
+            return []
+        try:
+            cur = self._connection.cursor()
+            cur.execute(
+                """
+                SELECT model_version,
+                       COUNT(*) AS n,
+                       AVG(confidence_score) AS avg_conf,
+                       AVG(latency_ms) AS avg_lat,
+                       SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END)::float / NULLIF(COUNT(*), 0) AS success_rate
+                FROM ab_test_results
+                WHERE created_at > NOW() - INTERVAL '30 days'
+                GROUP BY model_version
+                """
+            )
+            out = []
+            for row in cur.fetchall():
+                out.append({
+                    "model_version": row[0],
+                    "count": row[1],
+                    "avg_confidence": float(row[2]) if row[2] else 0,
+                    "avg_latency_ms": float(row[3]) if row[3] else 0,
+                    "success_rate": float(row[4]) if row[4] else 0,
+                })
+            return out
+        except Exception as e:
+            logger.error(f"get_ab_summary error: {e}")
+            return []
+
 
 class DatabaseManager:
     """Unified database manager combining Redis + PostgreSQL.
@@ -535,6 +753,30 @@ class DatabaseManager:
             "cache": self.cache.get_stats(),
             "storage": self.storage.get_extraction_stats(),
         }
+
+    def log_webhook_failure(self, *args, **kwargs) -> bool:
+        return self.storage.log_webhook_failure(*args, **kwargs)
+
+    def record_ab_result(self, *args, **kwargs) -> bool:
+        return self.storage.record_ab_result(*args, **kwargs)
+
+    def upsert_pipeline_stage(self, *args, **kwargs) -> bool:
+        return self.storage.upsert_pipeline_stage(*args, **kwargs)
+
+    def get_pipeline_stage_counts(self) -> dict[str, int]:
+        return self.storage.get_pipeline_stage_counts()
+
+    def get_daily_extraction_counts(self, days: int = 30) -> list[dict]:
+        return self.storage.get_daily_extraction_counts(days)
+
+    def get_recent_extraction_logs(self, limit: int = 100) -> list[dict]:
+        return self.storage.get_recent_extraction_logs(limit)
+
+    def get_recent_extractions_dashboard(self, limit: int = 20) -> list[dict]:
+        return self.storage.get_recent_extractions_dashboard(limit)
+
+    def get_ab_summary(self) -> list[dict]:
+        return self.storage.get_ab_summary()
 
     def close(self):
         """Close all connections."""

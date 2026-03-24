@@ -1,0 +1,38 @@
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: default
+  group_by: [alertname, severity]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - match:
+        severity: critical
+      receiver: critical-alerts
+
+receivers:
+  - name: default
+    webhook_configs:
+      - url: http://findoc-analyzer:8000/webhook/alertmanager
+        send_resolved: true
+
+  - name: critical-alerts
+    webhook_configs:
+      - url: http://findoc-analyzer:8000/webhook/alertmanager
+        send_resolved: true
+    # Uncomment and fill in for email/Slack:
+    # email_configs:
+    #   - to: ops@example.com
+    #     from: alertmanager@example.com
+    #     smarthost: smtp.example.com:587
+    # slack_configs:
+    #   - api_url: https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK
+
+inhibit_rules:
+  - source_match:
+      severity: critical
+    target_match:
+      severity: warning
+    equal: [alertname]

@@ -312,6 +312,12 @@ def main():
         report_dict = report.to_dict()
         print(json.dumps(report_dict, indent=2))
 
+        # Always persist the latest report for dashboard consumption
+        default_report_path = Path("results/latest_report.json")
+        default_report_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(default_report_path, "w") as f:
+            json.dump(report_dict, f, indent=2)
+
         if args.output:
             with open(args.output, "w") as f:
                 json.dump(report_dict, f, indent=2)
