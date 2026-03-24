@@ -98,6 +98,33 @@ class HealthResponse(BaseModel):
 class MetricsResponse(BaseModel):
     total_requests: int
     successful_requests: int
+
+
+class WebhookRegistration(BaseModel):
+    """Register a downstream service for extraction callbacks."""
+    service: str = Field(..., description="Service name (e.g., 'ticker-agent')")
+    url: str = Field(..., description="Webhook URL to receive callbacks")
+    events: list[str] = Field(default=["extraction.complete"], description="Events to subscribe to")
+    secret: str | None = Field(None, description="Optional secret for webhook signature verification")
+
+
+class WebhookRegistrationResponse(BaseModel):
+    """Response for webhook registration."""
+    status: str
+    service: str
+    url: str
+    events: list[str]
+    registered_at: str
+
+
+class PipelineStatusResponse(BaseModel):
+    """Pipeline processing status."""
+    stage: str
+    extraction_count: int
+    pending_enrichment: int
+    pending_visualization: int
+    last_processed_at: str | None = None
+    services: dict[str, str]  # service name → status
     failed_requests: int
     avg_latency_ms: float
     p50_latency_ms: float
@@ -170,6 +197,8 @@ def create_app(config: dict | None = None) -> FastAPI:
     app.add_api_route("/extract/batch", extract_batch, methods=["POST"], response_model=list[ExtractResponseModel])
     app.add_api_route("/health", health_check, methods=["GET"], response_model=HealthResponse)
     app.add_api_route("/metrics", get_metrics, methods=["GET"], response_model=MetricsResponse)
+    app.add_api_route("/webhook/register", register_webhook, methods=["POST"], response_model=WebhookRegistrationResponse)
+    app.add_api_route("/pipeline/status", pipeline_status, methods=["GET"], response_model=PipelineStatusResponse)
 
     return app
 
@@ -266,6 +295,74 @@ async def get_metrics() -> MetricsResponse:
         p50_latency_ms=latencies[n // 2] if n else 0,
         p95_latency_ms=latencies[int(n * 0.95)] if n else 0,
         p99_latency_ms=latencies[int(n * 0.99)] if n else 0,
+    )
+
+
+# ─── Webhook & Pipeline Endpoints ───────────────────────────────────────────
+
+# In-memory webhook registry (use Redis in production)
+registered_webhooks: dict[str, WebhookRegistration] = {}
+
+
+async def register_webhook(registration: WebhookRegistration) -> WebhookRegistrationResponse:
+    """Register a downstream service to receive extraction callbacks.
+
+    When extractions complete, registered webhooks will receive POST requests
+    with the extraction results. Used for pipeline integration with TickerAgent.
+
+    Example:
+        curl -X POST http://localhost:8000/webhook/register \
+          -H "Content-Type: application/json" \
+          -d '{
+            "service": "ticker-agent",
+            "url": "http://localhost:8002/ingest",
+            "events": ["extraction.complete"]
+          }'
+    """
+    registered_webhooks[registration.service] = registration
+    logger.info(f"Registered webhook for {registration.service}: {registration.url}")
+
+    return WebhookRegistrationResponse(
+        status="registered",
+        service=registration.service,
+        url=registration.url,
+        events=registration.events,
+        registered_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    )
+
+
+async def pipeline_status() -> PipelineStatusResponse:
+    """Get current pipeline processing status.
+
+    Returns counts of extractions, pending enrichments, and service health.
+    Used by the pipeline orchestrator to monitor flow between stages.
+    """
+    # Check downstream services
+    services = {}
+
+    # Try to connect to ticker-agent
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            resp = await client.get("http://localhost:8002/health")
+            services["ticker-agent"] = "healthy" if resp.status_code == 200 else "unreachable"
+    except Exception:
+        services["ticker-agent"] = "offline"
+
+    # Try to connect to viz-framework
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            resp = await client.get("http://localhost:8003/health")
+            services["viz-framework"] = "healthy" if resp.status_code == 200 else "unreachable"
+    except Exception:
+        services["viz-framework"] = "offline"
+
+    return PipelineStatusResponse(
+        stage="extraction",
+        extraction_count=state.success_count,
+        pending_enrichment=0,  # Would query database in production
+        pending_visualization=0,
+        last_processed_at=None,
+        services=services,
     )
 
 

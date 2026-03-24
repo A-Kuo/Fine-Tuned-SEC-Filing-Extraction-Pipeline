@@ -1,0 +1,241 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/A-Kuo/financial-intelligence-pipeline/schemas/pipeline-v1.json",
+  "title": "Financial Intelligence Pipeline - Stage 1 Output",
+  "description": "Schema for data exchanged between FinDocAnalyzer → Ticker Analyzer → Viz Framework",
+  "type": "object",
+  "required": ["extraction_id", "ticker", "company_name", "financials", "metadata"],
+  "properties": {
+    "extraction_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Unique identifier for this extraction event"
+    },
+    "ticker": {
+      "type": "string",
+      "pattern": "^[A-Z]{1,5}$",
+      "description": "Stock ticker symbol (e.g., AAPL, TSLA)"
+    },
+    "company_name": {
+      "type": "string",
+      "description": "Legal entity name as extracted from filing"
+    },
+    "filing_info": {
+      "type": "object",
+      "description": "Source filing metadata",
+      "properties": {
+        "filing_type": {
+          "type": "string",
+          "enum": ["10-K", "10-Q", "8-K", "DEF 14A", "SC 13D"],
+          "description": "SEC filing form type"
+        },
+        "filing_date": {
+          "type": "string",
+          "format": "date",
+          "description": "Filing date in ISO 8601 format"
+        },
+        "fiscal_year_end": {
+          "type": "string",
+          "format": "date",
+          "description": "Fiscal year end date"
+        },
+        "accession_number": {
+          "type": "string",
+          "description": "SEC EDGAR accession number"
+        }
+      }
+    },
+    "financials": {
+      "type": "object",
+      "description": "Extracted financial metrics from filing",
+      "properties": {
+        "revenue": {
+          "type": ["number", "null"],
+          "description": "Annual/quarterly revenue in USD"
+        },
+        "net_income": {
+          "type": ["number", "null"],
+          "description": "Net income in USD"
+        },
+        "total_assets": {
+          "type": ["number", "null"],
+          "description": "Total assets in USD"
+        },
+        "total_liabilities": {
+          "type": ["number", "null"],
+          "description": "Total liabilities in USD"
+        },
+        "eps": {
+          "type": ["number", "null"],
+          "description": "Earnings per share"
+        },
+        "sector": {
+          "type": ["string", "null"],
+          "description": "Industry sector classification"
+        },
+        "currency": {
+          "type": "string",
+          "default": "USD",
+          "description": "Currency of financial figures"
+        },
+        "units": {
+          "type": "string",
+          "enum": ["raw", "thousands", "millions", "billions"],
+          "default": "millions",
+          "description": "Unit multiplier for financial figures"
+        }
+      }
+    },
+    "market_context": {
+      "type": "object",
+      "description": "Enrichment data added by Ticker Analyzer (Stage 2)",
+      "properties": {
+        "current_price": {
+          "type": ["number", "null"],
+          "description": "Current stock price"
+        },
+        "price_change_24h": {
+          "type": ["number", "null"],
+          "description": "24-hour price change percentage"
+        },
+        "volume": {
+          "type": ["integer", "null"],
+          "description": "Trading volume"
+        },
+        "market_cap": {
+          "type": ["number", "null"],
+          "description": "Market capitalization"
+        },
+        "pe_ratio": {
+          "type": ["number", "null"],
+          "description": "Price-to-earnings ratio"
+        },
+        "52_week_high": {
+          "type": ["number", "null"],
+          "description": "52-week high price"
+        },
+        "52_week_low": {
+          "type": ["number", "null"],
+          "description": "52-week low price"
+        },
+        "sentiment_score": {
+          "type": ["number", "null"],
+          "minimum": -1,
+          "maximum": 1,
+          "description": "News sentiment score (-1 to 1)"
+        },
+        "analyst_rating": {
+          "type": ["string", "null"],
+          "enum": ["Strong Buy", "Buy", "Hold", "Sell", "Strong Sell"],
+          "description": "Consensus analyst rating"
+        },
+        "enriched_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp when enrichment was performed"
+        }
+      }
+    },
+    "viz_config": {
+      "type": "object",
+      "description": "Visualization configuration for Viz Framework (Stage 3)",
+      "properties": {
+        "chart_type": {
+          "type": "string",
+          "enum": ["financial_summary", "trend_analysis", "comparison", "full_dashboard"],
+          "default": "financial_summary",
+          "description": "Type of visualization to generate"
+        },
+        "time_range": {
+          "type": "string",
+          "enum": ["1M", "3M", "6M", "1Y", "5Y", "MAX"],
+          "default": "1Y",
+          "description": "Time range for charts"
+        },
+        "include_peers": {
+          "type": "boolean",
+          "default": false,
+          "description": "Include peer comparison data"
+        },
+        "drill_down": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable drill-down interactions"
+        },
+        "export_formats": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["pdf", "png", "svg", "html"]
+          },
+          "default": ["html"],
+          "description": "Export formats to generate"
+        }
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "required": ["extracted_at", "model_version", "confidence_score"],
+      "properties": {
+        "extracted_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Extraction timestamp"
+        },
+        "model_version": {
+          "type": "string",
+          "description": "Version of FinDocAnalyzer model used"
+        },
+        "confidence_score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Overall extraction confidence (0-1)"
+        },
+        "extraction_time_ms": {
+          "type": "integer",
+          "description": "Time taken for extraction in milliseconds"
+        },
+        "pipeline_version": {
+          "type": "string",
+          "default": "1.0.0",
+          "description": "Pipeline schema version"
+        },
+        "stage": {
+          "type": "string",
+          "enum": ["extracted", "enriched", "visualized"],
+          "description": "Current pipeline stage"
+        },
+        "processing_history": {
+          "type": "array",
+          "description": "Record of pipeline stages completed",
+          "items": {
+            "type": "object",
+            "properties": {
+              "stage": {
+                "type": "string",
+                "enum": ["extraction", "enrichment", "visualization"]
+              },
+              "service": {
+                "type": "string",
+                "description": "Service that processed this stage"
+              },
+              "timestamp": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "status": {
+                "type": "string",
+                "enum": ["success", "partial", "failed"]
+              }
+            }
+          }
+        }
+      }
+    },
+    "raw_output": {
+      "type": "string",
+      "description": "Optional: Raw LLM output for debugging"
+    }
+  }
+}

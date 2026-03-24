@@ -1,4 +1,9 @@
-.PHONY: test test-verbose lint format data train serve monitor benchmark clean help
+.PHONY: test test-verbose lint format data train serve serve-vllm serve-pipeline \
+        monitor benchmark evaluate dashboard \
+        infra-up infra-down db-init \
+        pipeline-up pipeline-down pipeline-status pipeline-logs \
+        pipeline-extract pipeline-enrich pipeline-visualize pipeline-run \
+        clean clean-all help
 
 # ─── Testing ─────────────────────────────────────────────────────────────────
 
@@ -65,6 +70,57 @@ benchmark:  ## Run performance benchmark
 
 evaluate:  ## Evaluate model accuracy
 	python evaluation/evaluate.py --generate-sample-metrics --output results/metrics.json
+
+# ─── Pipeline Integration ────────────────────────────────────────────────────
+
+pipeline-up:  ## Start full pipeline stack (FinDoc + Ticker + Viz)
+	docker compose -f docker-compose.pipeline.yml up -d
+	@echo "Pipeline starting..."
+	@echo "FinDocAnalyzer: http://localhost:8000"
+	@echo "TickerAgent:    http://localhost:8002"
+	@echo "VizFramework:   http://localhost:8003"
+	@echo "Streamlit:      http://localhost:8502"
+
+pipeline-down:  ## Stop full pipeline stack
+	docker compose -f docker-compose.pipeline.yml down
+
+pipeline-status:  ## Check pipeline service status
+	@docker compose -f docker-compose.pipeline.yml ps
+
+pipeline-logs:  ## View pipeline logs
+	docker compose -f docker-compose.pipeline.yml logs -f
+
+pipeline-extract:  ## Run extraction stage only
+	@echo "Running extraction on sample data..."
+	python serving/batch_inference.py \
+		--input_dir data/filings/ \
+		--server_url http://localhost:8000 \
+		--webhook_url http://localhost:8002/ingest
+
+pipeline-enrich:  ## Run enrichment stage only (requires extracted data)
+	@echo "Enriching tickers from database..."
+	curl -X POST http://localhost:8002/batch-enrich \
+		-H "Content-Type: application/json" \
+		-d '{"limit": 10, "min_confidence": 0.8}'
+
+pipeline-visualize:  ## Run visualization stage only (requires enriched data)
+	@echo "Generating dashboards..."
+	curl -X POST http://localhost:8003/render-batch \
+		-H "Content-Type: application/json" \
+		-d '{"chart_type": "financial_summary", "limit": 10}'
+
+pipeline-run:  ## Run full pipeline end-to-end
+	@echo "=== Pipeline Stage 1: Extraction ==="
+	$(MAKE) pipeline-extract
+	@echo "Waiting for extraction to complete..."
+	@sleep 5
+	@echo "=== Pipeline Stage 2: Enrichment ==="
+	$(MAKE) pipeline-enrich
+	@echo "Waiting for enrichment to complete..."
+	@sleep 5
+	@echo "=== Pipeline Stage 3: Visualization ==="
+	$(MAKE) pipeline-visualize
+	@echo "Pipeline complete! View dashboards at http://localhost:8502"
 
 # ─── Housekeeping ────────────────────────────────────────────────────────────
 
