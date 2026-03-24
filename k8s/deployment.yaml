@@ -1,0 +1,59 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: findoc-analyzer
+  namespace: findoc-analyzer
+  labels:
+    app: findoc-analyzer
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: findoc-analyzer
+  template:
+    metadata:
+      labels:
+        app: findoc-analyzer
+    spec:
+      containers:
+        - name: api
+          image: findoc-analyzer:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+              name: http
+          envFrom:
+            - secretRef:
+                name: findoc-secrets
+          env:
+            - name: POSTGRES_HOST
+              value: postgres.findoc-analyzer.svc.cluster.local
+            - name: REDIS_HOST
+              value: redis.findoc-analyzer.svc.cluster.local
+          volumeMounts:
+            - name: config
+              mountPath: /app/config
+              readOnly: true
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: "2"
+              memory: "8Gi"
+            limits:
+              cpu: "4"
+              memory: "16Gi"
+      volumes:
+        - name: config
+          configMap:
+            name: findoc-config

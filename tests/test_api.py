@@ -15,7 +15,7 @@ from serving.api import (
     ExtractBatchRequest,
     ExtractResponseModel,
     HealthResponse,
-    MetricsResponse,
+    StatsResponse,
 )
 
 
@@ -80,7 +80,7 @@ class TestResponseSchemas:
         assert resp.status == "healthy"
 
     def test_metrics_response(self):
-        resp = MetricsResponse(
+        resp = StatsResponse(
             total_requests=1000,
             successful_requests=980,
             failed_requests=20,

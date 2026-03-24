@@ -39,6 +39,9 @@ data/*.jsonl
 !data/sample_10k.txt
 !data/sample_10k.expected.json
 
+# EDGAR downloads (reproducible via scripts/fetch_edgar.py)
+data/raw_edgar/
+
 # ─── Secrets ─────────────────────────────────────────────────────────────────
 .env
 

@@ -1,0 +1,43 @@
+replicaCount: 2
+
+image:
+  repository: findoc-analyzer
+  tag: latest
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8000
+
+loadBalancer:
+  enabled: false
+
+ingress:
+  enabled: false
+  className: nginx
+  host: findoc.example.com
+  tlsSecret: findoc-tls
+
+resources:
+  requests:
+    cpu: "2"
+    memory: 8Gi
+  limits:
+    cpu: "4"
+    memory: 16Gi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 8
+  targetCPUUtilizationPercentage: 70
+
+env:
+  POSTGRES_HOST: postgres
+  REDIS_HOST: redis
+
+secrets:
+  postgresPassword: changeme
+  apiKeys: "changeme-prod-key"
+  webhookSigningSecret: changeme-hmac

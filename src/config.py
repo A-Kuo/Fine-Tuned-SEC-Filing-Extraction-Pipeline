@@ -55,6 +55,12 @@ def _apply_env_overrides(config: dict) -> None:
         "POSTGRES_DB": ("database", "postgres", "database"),
         "REDIS_HOST": ("database", "redis", "host"),
         "REDIS_PORT": ("database", "redis", "port"),
+        "EDGAR_USER_AGENT": ("edgar", "user_agent"),
+        "EDGAR_RPS": ("edgar", "requests_per_second"),
+        "API_KEYS": ("serving", "api_keys"),  # comma-separated list
+        "WEBHOOK_SIGNING_SECRET": ("security", "webhook_signing_secret"),
+        "LOG_FORMAT": ("logging", "format"),
+        "LOG_LEVEL": ("logging", "level"),
     }
 
     for env_var, key_path in env_map.items():
@@ -67,6 +73,10 @@ def _apply_env_overrides(config: dict) -> None:
             # Cast port numbers to int
             if "port" in key_path[-1].lower():
                 value = int(value)
+            if key_path == ("edgar", "requests_per_second"):
+                value = int(value)
+            if key_path == ("serving", "api_keys"):
+                value = [v.strip() for v in value.split(",") if v.strip()]
             d[key_path[-1]] = value
 
 

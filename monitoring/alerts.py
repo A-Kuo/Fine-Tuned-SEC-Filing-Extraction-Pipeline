@@ -1,18 +1,20 @@
 """Alert system for monitoring threshold breaches.
 
 Sends notifications when accuracy drops or latency exceeds SLA.
-Supports multiple backends: console logging (always), email (optional),
-and webhook (optional for Slack/PagerDuty integration).
-
-In production, this would integrate with PagerDuty or OpsGenie.
-For the prototype, we log alerts and write to a file for review.
+Supports multiple backends:
+  - Console logging (always)
+  - File append (always)
+  - Email (optional, configure monitoring.alert_email)
+  - Prometheus Alertmanager (optional, configure monitoring.alertmanager_url)
+  - Slack webhook (optional, configure monitoring.slack_webhook_url)
 """
 
 import json
 import smtplib
-from datetime import datetime
+from datetime import datetime, timezone
 from email.mime.text import MIMEText
 from pathlib import Path
+from typing import Any
 
 from loguru import logger
 
@@ -20,6 +22,14 @@ from monitoring.monitor import MonitoringReport
 
 
 ALERT_LOG_PATH = Path("results/alerts.jsonl")
+
+# Alertmanager severity map: our status → AM severity label
+_SEVERITY_MAP = {
+    "healthy": "info",
+    "warning": "warning",
+    "critical": "critical",
+    "degraded": "warning",
+}
 
 
 def send_alerts(report: MonitoringReport, config: dict | None = None) -> int:
@@ -47,13 +57,33 @@ def send_alerts(report: MonitoringReport, config: dict | None = None) -> int:
         # Persist to file
         _log_alert(alert_record)
 
-        # Email if configured
-        if config and config.get("monitoring", {}).get("alert_email"):
-            _send_email_alert(
-                to_addr=config["monitoring"]["alert_email"],
-                subject=f"[Financial LLM] {report.status.upper()}: {alert_msg[:50]}...",
-                body=_format_email_body(report, alert_msg),
-            )
+        if config:
+            mon_cfg = config.get("monitoring", {})
+
+            # Email
+            if mon_cfg.get("alert_email"):
+                _send_email_alert(
+                    to_addr=mon_cfg["alert_email"],
+                    subject=f"[Financial LLM] {report.status.upper()}: {alert_msg[:50]}...",
+                    body=_format_email_body(report, alert_msg),
+                )
+
+            # Prometheus Alertmanager
+            if mon_cfg.get("alertmanager_url"):
+                _send_alertmanager(
+                    url=mon_cfg["alertmanager_url"],
+                    alert_msg=alert_msg,
+                    status=report.status,
+                    report=report,
+                )
+
+            # Slack
+            if mon_cfg.get("slack_webhook_url"):
+                _send_slack(
+                    url=mon_cfg["slack_webhook_url"],
+                    alert_msg=alert_msg,
+                    status=report.status,
+                )
 
         alert_count += 1
 
@@ -105,6 +135,71 @@ Alert: {alert_msg}
   - Review recent extraction logs for anomalies
 """
     return body
+
+
+def _send_alertmanager(url: str, alert_msg: str, status: str, report: MonitoringReport) -> bool:
+    """POST a firing alert to Prometheus Alertmanager /api/v2/alerts.
+
+    Alertmanager expects a list of alert objects. We send one per call.
+    """
+    try:
+        import httpx
+
+        now = datetime.now(timezone.utc).isoformat()
+        severity = _SEVERITY_MAP.get(status, "warning")
+        payload = [
+            {
+                "labels": {
+                    "alertname": "FinDocMonitorAlert",
+                    "severity": severity,
+                    "service": "findoc-analyzer",
+                    "status": status,
+                },
+                "annotations": {
+                    "summary": alert_msg[:100],
+                    "description": alert_msg,
+                    "generated_at": report.generated_at,
+                },
+                "startsAt": now,
+            }
+        ]
+        am_url = url.rstrip("/") + "/api/v2/alerts"
+        r = httpx.post(am_url, json=payload, timeout=10)
+        if r.status_code < 300:
+            logger.info(f"Alert posted to Alertmanager ({r.status_code})")
+            return True
+        logger.warning(f"Alertmanager returned {r.status_code}: {r.text[:200]}")
+    except Exception as e:
+        logger.warning(f"Alertmanager dispatch failed (non-critical): {e}")
+    return False
+
+
+def _send_slack(url: str, alert_msg: str, status: str) -> bool:
+    """POST a Slack-compatible webhook message."""
+    try:
+        import httpx
+
+        severity = _SEVERITY_MAP.get(status, "warning")
+        color = {"critical": "#D32F2F", "warning": "#F9A825", "info": "#1976D2"}.get(severity, "#9E9E9E")
+        payload = {
+            "attachments": [
+                {
+                    "color": color,
+                    "title": f"[FinDocAnalyzer] {status.upper()}",
+                    "text": alert_msg,
+                    "footer": "FinDocAnalyzer monitoring",
+                    "ts": int(datetime.utcnow().timestamp()),
+                }
+            ]
+        }
+        r = httpx.post(url, json=payload, timeout=10)
+        if r.status_code < 300:
+            logger.info("Slack alert sent")
+            return True
+        logger.warning(f"Slack webhook returned {r.status_code}")
+    except Exception as e:
+        logger.warning(f"Slack alert failed (non-critical): {e}")
+    return False
 
 
 def _send_email_alert(to_addr: str, subject: str, body: str) -> bool:
