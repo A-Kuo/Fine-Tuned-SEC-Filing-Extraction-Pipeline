@@ -26,6 +26,8 @@ Production system for extracting structured financial data from SEC 10-K/10-Q/8-
 
 ## Architecture
 
+### Single-Component View
+
 ```
 SEC Filing Text
       │
@@ -53,6 +55,47 @@ SEC Filing Text
 │  Monitoring      │  Drift detection (z-test), latency SLAs, Streamlit dashboard
 └─────────────────┘
 ```
+
+### Full Pipeline Integration
+
+FinDocAnalyzer is the **extraction layer** in a three-stage financial intelligence pipeline:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         FINANCIAL INTELLIGENCE PIPELINE                      │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+Stage 1: EXTRACTION (This Repo)          Stage 2: ENRICHMENT                     Stage 3: VISUALIZATION
+┌─────────────────────┐                 ┌─────────────────────┐                 ┌─────────────────────┐
+│  SEC EDGAR Filing   │                 │  Ticker Symbol      │                 │  Combined Data      │
+│  (10-K/10-Q/8-K)   │───────────────▶│  + Market Data      │───────────────▶│  Dashboard          │
+└─────────┬───────────┘                 └─────────────────────┘                 └─────────────────────┘
+          │                                      ▲                                       ▲
+          ▼                                      │                                       │
+┌─────────────────────┐                          │                                       │
+│  FinDocAnalyzer     │  Extracted ticker ───────┘                                       │
+│  • Company name     │  + financials                                                    │
+│  • Revenue          │                                                                   │
+│  • Net income       │  ────────────────────────────────────────────────────────────────┘
+│  • Ticker symbol    │         (via shared PostgreSQL or webhook)
+└─────────────────────┘
+
+Data Flow:
+1. SEC Filing → Structured financials (JSON) + Ticker symbol
+2. Ticker symbol → Real-time market intelligence (price, trends, news sentiment)
+3. Combined → Interactive dashboards with drill-down capability
+```
+
+| Repository | Role | Consumes | Produces |
+|------------|------|----------|----------|
+| **[FinDocAnalyzer](https://github.com/A-Kuo/Fine-Tuned-SEC-Filing-Extraction-Pipeline)** (this repo) | **Document Extraction Layer** | Raw SEC filings | Structured financial data + ticker symbols |
+| **[Ticker-Analyzer-Agent](https://github.com/A-Kuo/Financial-Economic-Ticker-Analyzer-Agent)** | **Market Intelligence Layer** | Ticker symbols + extracted financials | Real-time market context, trends, sentiment |
+| **[Agentic-Viz-Framework](https://github.com/A-Kuo/Agentic-Visualization-Framework)** | **Presentation Layer** | Any structured data | Interactive dashboards, charts, drill-downs |
+
+**Integration Modes:**
+- **Database-linked**: FinDocAnalyzer writes to PostgreSQL; Ticker Analyzer polls for new tickers
+- **Webhook**: FinDocAnalyzer POSTs extracted ticker to Ticker Analyzer's `/ingest` endpoint
+- **Batch pipeline**: `make pipeline-run` orchestrates all three stages sequentially
 
 **Extracted fields:** `filing_id`, `company_name`, `ticker`, `filing_type`, `date`, `fiscal_year_end`, `revenue`, `net_income`, `total_assets`, `total_liabilities`, `eps`, `sector`
 
@@ -251,6 +294,65 @@ All runtime configuration lives in `config.yaml`, with environment variable over
 
 ---
 
+## Pipeline Integration
+
+FinDocAnalyzer can run standalone or as part of the integrated financial intelligence pipeline.
+
+### Quick Start: Full Pipeline
+
+```bash
+# Clone all three repositories
+git clone https://github.com/A-Kuo/Fine-Tuned-SEC-Filing-Extraction-Pipeline.git findoc-analyzer
+git clone https://github.com/A-Kuo/Financial-Economic-Ticker-Analyzer-Agent.git ticker-agent
+git clone https://github.com/A-Kuo/Agentic-Visualization-Framework.git viz-framework
+
+# Start the full stack
+cd findoc-analyzer
+docker compose -f docker-compose.pipeline.yml up -d
+
+# Run end-to-end pipeline
+make pipeline-extract    # Extract from SEC filings
+make pipeline-enrich     # Enrich with market data
+make pipeline-visualize  # Generate dashboard
+```
+
+### Pipeline Data Schema
+
+**Inter-service contract** (JSON Schema in `schemas/pipeline-v1.json`):
+
+```json
+{
+  "extraction_id": "uuid",
+  "ticker": "AAPL",
+  "company_name": "Apple Inc.",
+  "financials": {
+    "revenue": 394_328_000_000,
+    "net_income": 99_803_000_000,
+    "filing_date": "2024-09-28"
+  },
+  "market_context": {        // Populated by Ticker Analyzer
+    "current_price": 189.52,
+    "52_week_high": 199.62,
+    "sentiment_score": 0.72
+  },
+  "viz_config": {             // Used by Viz Framework
+    "chart_type": "financial_summary",
+    "drill_down": true
+  }
+}
+```
+
+### API Endpoints for Downstream Integration
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/extract` | POST | Single filing extraction |
+| `/extract/batch` | POST | Batch extraction with callback URL |
+| `/webhook/register` | POST | Register downstream service URL |
+| `/pipeline/status` | GET | Current pipeline stage status |
+
+---
+
 ## Roadmap
 
 **Iteration 2**
@@ -258,12 +360,14 @@ All runtime configuration lives in `config.yaml`, with environment variable over
 - Hyperparameter sweep: LoRA rank, learning rate, target module ablation
 - A/B testing framework for adapter version comparison
 - Prometheus metrics export + Grafana dashboards
+- **Pipeline integration**: Webhook callbacks to Ticker Analyzer
 
 **Iteration 3**
 - Multi-GPU training with DeepSpeed ZeRO-3
 - Streaming inference for long documents (>2048 tokens)
 - RLHF alignment using analyst-reviewed extraction pairs
 - Kubernetes deployment manifests
+- **Pipeline integration**: Event-driven architecture with message queue
 
 ---
 

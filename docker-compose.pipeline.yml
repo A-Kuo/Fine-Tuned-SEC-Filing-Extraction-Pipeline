@@ -1,0 +1,222 @@
+# Full Pipeline Stack: FinDocAnalyzer + Ticker Analyzer + Viz Framework
+# Orchestrates all three services with shared networking and data volumes
+#
+# Usage:
+#   docker compose -f docker-compose.pipeline.yml up -d
+#   docker compose -f docker-compose.pipeline.yml logs -f findoc-analyzer
+
+version: "3.9"
+
+services:
+  # ============================================================================
+  # Stage 1: FinDocAnalyzer (Document Extraction Layer)
+  # ============================================================================
+  findoc-analyzer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: pipeline-findoc
+    ports:
+      - "8000:8000"  # REST API
+      - "8001:8001"  # vLLM (optional)
+    environment:
+      - HF_TOKEN=${HF_TOKEN}
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=finllm
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-finllm_dev}
+      - POSTGRES_DB=financial_llm
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - WEBHOOK_TARGET=http://ticker-agent:8002/ingest  # Downstream service
+      - LOG_LEVEL=info
+    volumes:
+      - ./models:/app/models:ro
+      - shared-data:/app/data/shared
+      - pipeline-logs:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - pipeline-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  # ============================================================================
+  # Stage 2: Ticker Analyzer (Market Intelligence Layer)
+  # ============================================================================
+  ticker-agent:
+    # Note: This service references the second repository
+    # In production, build from: https://github.com/A-Kuo/Financial-Economic-Ticker-Analyzer-Agent
+    image: ticker-agent:latest
+    build:
+      context: ${TICKER_AGENT_PATH:-../Financial-Economic-Ticker-Analyzer-Agent}
+      dockerfile: Dockerfile
+    container_name: pipeline-ticker
+    ports:
+      - "8002:8002"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - YAHOO_FINANCE_API_KEY=${YAHOO_FINANCE_API_KEY}
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=finllm
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-finllm_dev}
+      - POSTGRES_DB=financial_llm
+      - UPSTREAM_SERVICE=http://findoc-analyzer:8000
+      - DOWNSTREAM_SERVICE=http://viz-framework:8003
+      - POLL_INTERVAL=30  # Seconds between polling for new tickers
+    volumes:
+      - shared-data:/app/data/shared
+      - pipeline-logs:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      findoc-analyzer:
+        condition: service_healthy
+    networks:
+      - pipeline-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ============================================================================
+  # Stage 3: Viz Framework (Presentation Layer)
+  # ============================================================================
+  viz-framework:
+    # Note: This service references the third repository
+    # In production, build from: https://github.com/A-Kuo/Agentic-Visualization-Framework
+    image: viz-framework:latest
+    build:
+      context: ${VIZ_FRAMEWORK_PATH:-../Agentic-Visualization-Framework}
+      dockerfile: Dockerfile
+    container_name: pipeline-viz
+    ports:
+      - "8003:8003"  # API
+      - "8502:8501"  # Streamlit (mapped to avoid conflict with FinDocAnalyzer)
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=finllm
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-finllm_dev}
+      - POSTGRES_DB=financial_llm
+      - DATA_SOURCE=http://findoc-analyzer:8000,http://ticker-agent:8002
+      - DASHBOARD_THEME=financial
+    volumes:
+      - shared-data:/app/data/shared
+      - pipeline-logs:/app/logs
+      - viz-outputs:/app/output
+    depends_on:
+      postgres:
+        condition: service_healthy
+      findoc-analyzer:
+        condition: service_healthy
+      ticker-agent:
+        condition: service_healthy
+    networks:
+      - pipeline-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ============================================================================
+  # Shared Infrastructure
+  # ============================================================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: pipeline-postgres
+    environment:
+      POSTGRES_USER: finllm
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-finllm_dev}
+      POSTGRES_DB: financial_llm
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init_db.sql:/docker-entrypoint-initdb.d/01-init.sql
+      - ./scripts/init_pipeline_schema.sql:/docker-entrypoint-initdb.d/02-pipeline.sql
+    networks:
+      - pipeline-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U finllm"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: pipeline-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --maxmemory 512mb --maxmemory-policy allkeys-lru
+    networks:
+      - pipeline-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ============================================================================
+  # Pipeline Orchestrator (Optional - for batch workflows)
+  # ============================================================================
+  pipeline-orchestrator:
+    image: pipeline-orchestrator:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.orchestrator
+    container_name: pipeline-orchestrator
+    environment:
+      - FINDOC_API=http://findoc-analyzer:8000
+      - TICKER_API=http://ticker-agent:8002
+      - VIZ_API=http://viz-framework:8003
+      - POSTGRES_HOST=postgres
+    volumes:
+      - ./pipeline-jobs:/app/jobs
+      - pipeline-logs:/app/logs
+      - shared-data:/app/data/shared
+    depends_on:
+      - findoc-analyzer
+      - ticker-agent
+      - viz-framework
+    networks:
+      - pipeline-network
+    profiles:
+      - batch  # Only start when explicitly requested: --profile batch
+
+# ============================================================================
+# Volumes
+# ============================================================================
+volumes:
+  postgres_data:
+  shared-data:      # Cross-service data exchange
+  pipeline-logs:    # Centralized logging
+  viz-outputs:      # Dashboard outputs
+
+# ============================================================================
+# Networks
+# ============================================================================
+networks:
+  pipeline-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
