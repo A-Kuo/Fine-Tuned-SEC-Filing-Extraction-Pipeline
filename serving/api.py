@@ -1,20 +1,25 @@
 """FastAPI REST API for SEC Filing Extraction.
 
 Endpoints:
-    POST /extract         - Single document extraction
-    POST /extract/batch   - Batch extraction (up to 32 docs)
-    GET  /health          - Health check + model status
-    GET  /metrics         - Prometheus text exposition format
-    GET  /stats           - JSON request/latency statistics
-    POST /webhook/register - Register downstream webhook
-    GET  /webhook/verify  - Webhook integration probe
-    GET  /pipeline/status - Pipeline + downstream health
-    GET  /ab/results      - A/B test summary (when enabled)
+    POST /extract                 - Single document extraction
+    POST /extract/batch           - Batch extraction (up to 32 docs)
+    GET  /health                  - Health check + model status
+    GET  /metrics                 - Prometheus text exposition format
+    GET  /stats                   - JSON request/latency statistics
+    GET  /extractions/{filing_id} - Retrieve stored extraction by ID
+    POST /webhook/register        - Register downstream webhook
+    GET  /webhook/verify          - Webhook integration probe
+    GET  /webhook/failures        - Inspect dead-letter queue
+    GET  /pipeline/status         - Pipeline + downstream health
+    GET  /ab/results              - A/B test summary (when enabled)
+    POST /ab/promote              - Promote challenger model to primary
+    POST /webhook/alertmanager    - Receive Alertmanager callbacks
 """
 
 from __future__ import annotations
 
 import asyncio
+import collections
 import hashlib
 import hmac
 import json
@@ -192,7 +197,7 @@ class AppState:
         self.vllm_client: httpx.AsyncClient | None = None
         self.vllm_url: str | None = None
         self.start_time: float = time.time()
-        self.latencies: list[float] = []
+        self.latencies: collections.deque[float] = collections.deque(maxlen=10000)
         self.success_count: int = 0
         self.error_count: int = 0
         self.config: dict = {}
@@ -292,7 +297,7 @@ def create_app(config: dict | None = None) -> FastAPI:
     async def access_log(request: Request, call_next):
         start = time.time()
         try:
-            assert_api_key_if_configured(request)
+            assert_api_key_if_configured(request, state.config or None)
         except HTTPException as e:
             return Response(
                 content=json.dumps({"detail": e.detail}),
@@ -336,10 +341,12 @@ def create_app(config: dict | None = None) -> FastAPI:
     app.add_api_route("/stats", stats_json, methods=["GET"], response_model=StatsResponse)
     app.add_api_route("/webhook/register", register_webhook, methods=["POST"], response_model=WebhookRegistrationResponse)
     app.add_api_route("/webhook/verify", webhook_verify, methods=["GET"])
+    app.add_api_route("/webhook/failures", webhook_failures, methods=["GET"])
     app.add_api_route("/pipeline/status", pipeline_status, methods=["GET"], response_model=PipelineStatusResponse)
     app.add_api_route("/ab/results", ab_results, methods=["GET"])
     app.add_api_route("/ab/promote", ab_promote, methods=["POST"])
     app.add_api_route("/webhook/alertmanager", alertmanager_receiver, methods=["POST"])
+    app.add_api_route("/extractions/{filing_id}", get_extraction, methods=["GET"])
 
     return app
 
@@ -365,7 +372,7 @@ async def run_extraction(req: ExtractRequest, background_tasks: BackgroundTasks)
         EXTRACTION_TOTAL.labels(status=response.status, filing_type=ft or "unknown").inc()
 
         model = _to_response_model(response)
-        _maybe_record_ab(req, response, latency)
+        model.ab_variant = _maybe_record_ab(req, response, latency)
         _maybe_persist(req, response, latency)
         background_tasks.add_task(_dispatch_webhooks_background, model)
         return model
@@ -438,6 +445,24 @@ async def webhook_verify() -> dict[str, str]:
     return {"status": "ok", "message": "Webhook endpoint ready for FinDocAnalyzer pipeline integration"}
 
 
+async def webhook_failures(limit: int = 50) -> dict[str, Any]:
+    """Return recent failed webhook deliveries from the dead-letter queue."""
+    if not state.db:
+        return {"failures": [], "message": "Database unavailable"}
+    failures = state.db.get_webhook_failures(limit=min(limit, 200))
+    return {"count": len(failures), "failures": failures}
+
+
+async def get_extraction(filing_id: str) -> dict[str, Any]:
+    """Look up a previously stored extraction result by filing ID."""
+    if not state.db:
+        raise HTTPException(503, "Database unavailable")
+    result = state.db.get_extraction(filing_id)
+    if result is None:
+        raise HTTPException(404, f"Extraction not found for filing_id={filing_id!r}")
+    return result
+
+
 async def alertmanager_receiver(request: Request) -> dict[str, Any]:
     """Receive firing/resolved alerts from Prometheus Alertmanager."""
     try:
@@ -464,14 +489,16 @@ async def pipeline_status() -> PipelineStatusResponse:
     viz_url = (cfg.get("serving") or {}).get("viz_framework_url", "http://localhost:8003")
 
     services: dict[str, str] = {}
-    if check_http_health(f"{ticker_url}/health"):
+    ticker_ok = await asyncio.to_thread(check_http_health, f"{ticker_url}/health")
+    if ticker_ok:
         state.circuit_ticker.record_success()
         services["ticker-agent"] = "healthy"
     else:
         state.circuit_ticker.record_failure()
         services["ticker-agent"] = f"unreachable({state.circuit_ticker.state.value})"
 
-    if check_http_health(f"{viz_url}/health"):
+    viz_ok = await asyncio.to_thread(check_http_health, f"{viz_url}/health")
+    if viz_ok:
         state.circuit_viz.record_success()
         services["viz-framework"] = "healthy"
     else:
@@ -523,20 +550,21 @@ async def ab_promote(body: ABPromoteRequest) -> dict[str, str]:
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
 
-def _maybe_record_ab(req: ExtractRequest, response: ExtractionResponse, latency_ms: float) -> None:
-    if not state.db:
-        return
+def _maybe_record_ab(req: ExtractRequest, response: ExtractionResponse, latency_ms: float) -> str | None:
+    """Record A/B assignment; returns the variant label ('primary' or 'challenger')."""
     cfg = state.config
     ab = assign_for_request(req.filing_id, None, cfg)
-    fid = req.filing_id or "unknown"
-    state.db.record_ab_result(
-        fid,
-        ab.model_version_label,
-        ab.use_challenger,
-        response.confidence_score,
-        response.status,
-        int(latency_ms),
-    )
+    if state.db:
+        fid = req.filing_id or "unknown"
+        state.db.record_ab_result(
+            fid,
+            ab.model_version_label,
+            ab.use_challenger,
+            response.confidence_score,
+            response.status,
+            int(latency_ms),
+        )
+    return ab.model_version_label
 
 
 def _maybe_persist(req: ExtractRequest, response: ExtractionResponse, latency_ms: float) -> None:

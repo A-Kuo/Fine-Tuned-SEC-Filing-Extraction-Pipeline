@@ -611,6 +611,33 @@ class PostgresStorage:
             logger.error(f"get_recent_extractions_dashboard error: {e}")
             return []
 
+    def get_webhook_failures(self, limit: int = 50) -> list[dict]:
+        """Return recent dead-letter-queue entries (failed webhook deliveries)."""
+        if not self._available:
+            return []
+        try:
+            cur = self._connection.cursor()
+            cur.execute(
+                """
+                SELECT id, service, target_url, error_message, attempt_count, created_at
+                FROM webhook_failures
+                ORDER BY created_at DESC
+                LIMIT %s
+                """,
+                (limit,),
+            )
+            cols = ["id", "service", "target_url", "error_message", "attempt_count", "created_at"]
+            rows = []
+            for r in cur.fetchall():
+                rows.append({
+                    cols[i]: (str(r[i]) if isinstance(r[i], datetime) else r[i])
+                    for i in range(len(cols))
+                })
+            return rows
+        except Exception as e:
+            logger.error(f"get_webhook_failures error: {e}")
+            return []
+
     def get_ab_summary(self) -> list[dict]:
         """Per-model-version aggregates for A/B reporting."""
         if not self._available:
@@ -777,6 +804,9 @@ class DatabaseManager:
 
     def get_ab_summary(self) -> list[dict]:
         return self.storage.get_ab_summary()
+
+    def get_webhook_failures(self, limit: int = 50) -> list[dict]:
+        return self.storage.get_webhook_failures(limit)
 
     def close(self):
         """Close all connections."""
