@@ -130,6 +130,7 @@ class ExtractResponseModel(BaseModel):
     model_version: str = ""
     error: str | None = None
     ab_variant: str | None = None
+    cache_hit: bool = False
 
 
 class HealthResponse(BaseModel):
@@ -355,6 +356,32 @@ def create_app(config: dict | None = None) -> FastAPI:
 
 
 async def run_extraction(req: ExtractRequest, background_tasks: BackgroundTasks) -> ExtractResponseModel:
+    # Cache-first: if filing_id is known and result exists, skip model entirely.
+    # This satisfies the requirement to avoid re-processing the same filing twice.
+    if req.filing_id and state.db:
+        cached = state.db.get_extraction(req.filing_id)
+        if cached:
+            logger.info(f"Cache hit — returning stored result for filing_id={req.filing_id!r}")
+            return ExtractResponseModel(
+                status="success",
+                filing_id=cached.get("filing_id") or req.filing_id,
+                company_name=cached.get("company_name"),
+                ticker=cached.get("ticker"),
+                filing_type=cached.get("filing_type"),
+                date=cached.get("date"),
+                fiscal_year_end=cached.get("fiscal_year_end"),
+                revenue=cached.get("revenue"),
+                net_income=cached.get("net_income"),
+                total_assets=cached.get("total_assets"),
+                total_liabilities=cached.get("total_liabilities"),
+                eps=cached.get("eps"),
+                sector=cached.get("sector"),
+                confidence_score=float(cached.get("confidence_score") or 0.0),
+                latency_ms=0.0,
+                model_version=cached.get("model_version") or "cached",
+                cache_hit=True,
+            )
+
     start = time.time()
     try:
         if state.vllm_url and state.vllm_client:
