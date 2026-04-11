@@ -307,7 +307,7 @@ def generate_dataset(
 
     file_size_mb = output_path.stat().st_size / 1e6
     logger.info(f"Dataset saved: {output_path} ({file_size_mb:.1f} MB, {num_samples} examples)")
-    console.print(f"[bold green]✓[/bold green] {output_path} ({num_samples} examples, {file_size_mb:.1f} MB)")
+    console.print(f"[bold green][OK][/bold green] {output_path} ({num_samples} examples, {file_size_mb:.1f} MB)")
 
 
 def generate_sample_filing(output_path: Path) -> None:
@@ -323,8 +323,8 @@ def generate_sample_filing(output_path: Path) -> None:
     with open(expected_path, "w") as f:
         json.dump(json.loads(example["output"]), f, indent=2)
 
-    console.print(f"[bold green]✓[/bold green] Sample filing: {output_path}")
-    console.print(f"[bold green]✓[/bold green] Expected extraction: {expected_path}")
+    console.print(f"[bold green][OK][/bold green] Sample filing: {output_path}")
+    console.print(f"[bold green][OK][/bold green] Expected extraction: {expected_path}")
 
 
 def main():

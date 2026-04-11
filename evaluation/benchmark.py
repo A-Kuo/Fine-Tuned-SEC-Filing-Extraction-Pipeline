@@ -171,8 +171,15 @@ async def live_benchmark(
     }
 
 
-def print_results(results: dict):
+def print_results(results: dict) -> None:
     """Pretty-print benchmark results."""
+    if not results or "latency" not in results:
+        console.print(
+            "\n[red]No benchmark results to display "
+            "(live run returned no successful requests or empty payload).[/red]"
+        )
+        return
+
     console.print("\n[bold]═══ Benchmark Results ═══[/bold]\n")
 
     # Latency table
@@ -223,6 +230,10 @@ def main():
         results = simulate_benchmark(args.n_docs)
 
     print_results(results)
+
+    if not results or "latency" not in results:
+        console.print("\n[red]Benchmark failed — not writing incomplete JSON.[/red]")
+        sys.exit(1)
 
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
