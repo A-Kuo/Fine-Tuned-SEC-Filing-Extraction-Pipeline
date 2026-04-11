@@ -52,12 +52,12 @@ def download_model(model_id: str, cache_dir: str | None = None, token: str | Non
             resume_download=True,
         )
         logger.info(f"Model downloaded to: {model_path}")
-        console.print(f"[bold green]✓[/bold green] Model saved to: {model_path}")
+        console.print(f"[bold green][OK][/bold green] Model saved to: {model_path}")
         return Path(model_path)
 
     except Exception as e:
         logger.error(f"Download failed: {e}")
-        console.print(f"[bold red]✗[/bold red] Download failed: {e}")
+        console.print(f"[bold red][FAIL][/bold red] Download failed: {e}")
         console.print("\n[yellow]Troubleshooting:[/yellow]")
         console.print("  1. For gated models (Llama): Accept license at huggingface.co/{model_id}")
         console.print("  2. Set HF_TOKEN in .env or pass --token")
@@ -88,7 +88,7 @@ def verify_model(model_path: Path) -> bool:
         logger.error("No model weight files found (.safetensors or .bin)")
         return False
 
-    console.print("[bold green]✓[/bold green] Model verification passed")
+    console.print("[bold green][OK][/bold green] Model verification passed")
     return True
 
 
@@ -125,7 +125,7 @@ def check_quantization_ready() -> dict:
     # Display results
     console.print("\n[bold]System Quantization Check:[/bold]")
     for key, val in info.items():
-        status = "[green]✓[/green]" if val else "[red]✗[/red]"
+        status = "[green][OK][/green]" if val else "[red][NO][/red]"
         console.print(f"  {status} {key}: {val}")
 
     if info["gpu_memory_gb"] and info["gpu_memory_gb"] >= 8:

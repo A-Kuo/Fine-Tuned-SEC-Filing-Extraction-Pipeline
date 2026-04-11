@@ -90,6 +90,23 @@ FUZZY_FIELDS = ["revenue", "net_income", "total_assets", "total_liabilities", "e
 ALL_FIELDS = EXACT_FIELDS + FUZZY_FIELDS
 
 
+def _parse_prediction_line(data: dict) -> tuple[str, dict]:
+    """Return (match_id, extraction_dict) for one predictions JSONL line.
+
+    Supports:
+    - Training format: ``{"id": "sec-000001", "instruction": ..., "output": "<json>"}``
+    - Flat extraction: ``{"filing_id": "...", "company_name": ...}``
+    """
+    if "output" in data:
+        out = data["output"]
+        body = json.loads(out) if isinstance(out, str) else out
+        pid = data.get("id") or body.get("filing_id") or body.get("id", "")
+        return str(pid), body
+    body = data
+    pid = data.get("filing_id") or data.get("id") or data.get("source_file", "")
+    return str(pid), body
+
+
 def evaluate_single(prediction: dict, ground_truth: dict) -> dict:
     """Evaluate a single prediction against ground truth.
 
@@ -128,26 +145,40 @@ def evaluate_dataset(
             "n_samples": int,
         }
     """
-    # Load predictions
-    predictions = {}
-    with open(predictions_path) as f:
+    # Load predictions (must align with ground-truth ids: sec-XXXXXX or filing_id)
+    predictions: dict[str, dict] = {}
+    with open(predictions_path, encoding="utf-8") as f:
         for line in f:
+            line = line.strip()
+            if not line:
+                continue
             data = json.loads(line)
-            pid = data.get("source_file", data.get("id", ""))
-            predictions[pid] = data
+            pid, body = _parse_prediction_line(data)
+            if not pid:
+                logger.warning("Skipping prediction line without id/filing_id: %s...", line[:120])
+                continue
+            predictions[pid] = body
 
-    # Load ground truth
-    ground_truths = {}
-    with open(ground_truth_path) as f:
+    # Load ground truth (same JSONL schema as download_dataset.py test split)
+    ground_truths: dict[str, dict] = {}
+    with open(ground_truth_path, encoding="utf-8") as f:
         for line in f:
+            line = line.strip()
+            if not line:
+                continue
             data = json.loads(line)
-            gid = data.get("id", "")
-            # Extract the output JSON
             if "output" in data:
                 gt = json.loads(data["output"]) if isinstance(data["output"], str) else data["output"]
             else:
                 gt = data
-            ground_truths[gid] = gt
+            gid = data.get("id") or gt.get("filing_id", "")
+            if not gid:
+                logger.warning("Skipping ground-truth line without id: %s...", line[:120])
+                continue
+            ground_truths[str(gid)] = gt
+            # Alias by SEC-style filing_id so flat prediction JSON can match
+            if gt.get("filing_id"):
+                ground_truths[str(gt["filing_id"])] = gt
 
     # Match predictions to ground truth
     field_counts = defaultdict(lambda: {"correct": 0, "total": 0})

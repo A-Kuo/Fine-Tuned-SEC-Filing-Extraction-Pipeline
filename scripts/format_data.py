@@ -178,7 +178,7 @@ def validate_formatted_data(path: Path, fmt: str, num_check: int = 5) -> bool:
             console.print(f"[red]✗[/red] {err}")
         return False
 
-    console.print(f"[green]✓[/green] Validation passed ({num_check} examples checked)")
+    console.print(f"[green][OK][/green] Validation passed ({num_check} examples checked)")
     return True
 
 
@@ -205,7 +205,7 @@ def main():
     output_path = Path(args.output) if args.output else input_path.with_suffix(f".{args.format}.jsonl")
 
     count = format_dataset(input_path, output_path, args.format, args.max_samples)
-    console.print(f"\n[bold green]✓[/bold green] Formatted {count} examples → {output_path}")
+    console.print(f"\n[bold green][OK][/bold green] Formatted {count} examples → {output_path}")
 
     if args.validate:
         validate_formatted_data(output_path, args.format)
