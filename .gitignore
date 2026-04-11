@@ -18,6 +18,13 @@ env/
 *.swp
 *.swo
 *~
+*.code-workspace
+
+# ─── Cursor IDE ───────────────────────────────────────────────────────────────
+# Keep .cursor/CLAUDE.md (project agent context) but exclude installed skills
+# and any personal IDE config that doesn't belong in the project repo
+.cursor/skills/
+.cursor/rules/
 
 # ─── Testing ─────────────────────────────────────────────────────────────────
 .pytest_cache/
