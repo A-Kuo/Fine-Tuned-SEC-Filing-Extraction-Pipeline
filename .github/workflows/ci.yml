@@ -31,8 +31,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          # Install core deps (skip GPU-only packages for CI)
-          pip install pyyaml loguru fastapi pydantic httpx pytest rich tqdm
+          pip install -r requirements-ci.txt
 
       - name: Generate test data
         run: |
@@ -40,7 +39,7 @@ jobs:
           python scripts/format_data.py
 
       - name: Run tests
-        run: python -m pytest tests/ -v
+        run: python -m pytest tests/ -v --tb=short
 
   lint:
     runs-on: ubuntu-latest
@@ -55,5 +54,7 @@ jobs:
       - name: Install ruff
         run: pip install ruff
 
+      # Non-blocking: report issues without failing the workflow (legacy behavior).
+      # Flip to strict CI: remove --exit-zero after cleaning remaining warnings.
       - name: Run linter
         run: ruff check src/ serving/ monitoring/ evaluation/ tests/ --exit-zero
