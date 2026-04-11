@@ -31,7 +31,7 @@ typecheck:  ## Run type checker
 
 data:  ## Generate training data
 	python scripts/download_dataset.py
-	python scripts/format_data.py
+	python scripts/format_data.py --input data/sec_filings_train.jsonl --format chat
 
 fetch-edgar:  ## Fetch real SEC filings (respects SEC rate limits; set EDGAR tickers in config)
 	python scripts/fetch_edgar.py
