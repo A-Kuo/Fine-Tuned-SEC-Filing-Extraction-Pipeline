@@ -1,0 +1,43 @@
+# Optional Azure / container deploy — does NOT run on every push.
+# Wire this up after adding GitHub secrets (e.g. AZURE_CREDENTIALS, registry tokens).
+#
+# Why separate from CI: deploy often needs cloud secrets; a half-configured deploy
+# job on push/main is the usual cause of perpetual "deploy workflow failed".
+
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      notes:
+        description: "Optional deploy notes"
+        required: false
+        default: ""
+
+jobs:
+  verify-ready:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install CI test deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-ci.txt
+
+      - name: Smoke test (imports + quick pytest subset)
+        run: |
+          python -c "import serving.api; print('serving.api OK')"
+          python -m pytest tests/test_postprocessing.py tests/test_circuit_breaker.py tests/test_ab_router.py -q
+
+      - name: Next steps
+        run: |
+          echo "Smoke checks passed. To deploy to Azure App Service / Container Apps:"
+          echo "  1. Add secrets: AZURE_CREDENTIALS (or OIDC federated credential)"
+          echo "  2. Use https://github.com/Azure/webapps-deploy or azure/container-apps-deploy-action"
+          echo "  3. Replace this workflow's jobs with your real deploy steps."

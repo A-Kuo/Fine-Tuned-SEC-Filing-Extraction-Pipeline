@@ -20,7 +20,7 @@ classifiers = [
 ]
 
 [project.urls]
-Repository = "https://github.com/akuo6/financial-llm"
+Repository = "https://github.com/A-Kuo/Fine-Tuned-SEC-Filing-Extraction-Pipeline"
 
 # ─── Tool Configuration ─────────────────────────────────────────────────────
 
