@@ -1,31 +1,33 @@
 # Fine-Tuned-SEC-Filing-Extraction-Pipeline
 
-**SEC document extraction using QLoRA fine-tuned Llama 3.1 8B**
+**Untagged-prose extraction from SEC filings using QLoRA fine-tuned Llama 3.1 8B**
 
 [![CI](https://img.shields.io/badge/CI-passing-brightgreen)](https://github.com/A-Kuo/Fine-Tuned-SEC-Filing-Extraction-Pipeline/actions)
 [![Python](https://img.shields.io/badge/python-3.10%20|%203.11%20|%203.12-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Status](https://img.shields.io/badge/Status-Production--Grade-brightgreen.svg)]()
 
-> *"Every public company in the United States files quarterly and annual financial reports with the SEC. These filings contain some of the most valuable structured financial data on earth — buried inside inconsistent prose, legalese, and embedded tables that no general-purpose parser can reliably handle."*
+> *"SEC filings contain valuable financial data buried in narrative prose — MD&A sections, footnotes, non-GAAP reconciliations, and untagged tables — that no general-purpose parser can reliably handle. This pipeline extracts structured data from that untagged text."*
+
+> **Scope:** This repo handles **untagged-prose extraction only** — narrative sections that the SEC filer did not machine-tag with iXBRL. For iXBRL-tagged facts (deterministic ingestion, rate limiting, amendment chains, quality gates), see [sec-edgar-extraction-pipeline](https://github.com/A-Kuo/sec-edgar-extraction-pipeline). This repo consumes filing documents and tagged facts from that pipeline; it does not reimplement EDGAR ingestion. All facts emitted here carry `method='llm'` with a confidence score and model version. An `llm` fact never overwrites an `xbrl` fact for the same natural key.
 
 ---
 
-## The Problem: Why SEC Filings Are Hard
+## The Problem: Why Untagged Prose Is Hard
 
-The SEC's EDGAR database holds over 20 million filings from tens of thousands of companies. On paper, this is one of the richest free financial datasets in existence. In practice, extracting reliable structured data from it is a genuinely hard problem:
+Many financial figures and disclosures in SEC filings are machine-tagged via iXBRL — those are handled deterministically by the [sec-edgar-extraction-pipeline](https://github.com/A-Kuo/sec-edgar-extraction-pipeline). But a significant portion of financially material information lives in **untagged narrative text** that requires language understanding:
 
-**1. No consistent structure.** A 10-K filed by Apple in 2024 looks nothing like a 10-K filed by a regional bank in 2019. Sections appear in different orders. Tables use different column layouts. Revenue appears in the income statement, in MD&A, and sometimes in footnotes — each with slightly different numbers due to adjustments, rounding, or restated figures.
+**1. No consistent structure.** A 10-K filed by Apple in 2024 looks nothing like a 10-K filed by a regional bank in 2019. MD&A sections, footnotes, and non-GAAP reconciliations appear in different orders with varying formats.
 
 **2. Legalese obscures financial signal.** The Management Discussion & Analysis (MD&A) section is where companies discuss their actual financial performance. But it is written by lawyers and investor relations teams to minimize legal exposure, not to communicate clearly. "Revenue increased 12% year-over-year driven by growth in our services segment, partially offset by headwinds in our hardware category" encodes aspect-level sentiment that requires NLP understanding, not keyword matching.
 
 **3. Numbers appear in multiple formats.** `$394,328 million`, `$394.3 billion`, `394328000000` — the same number, three representations. Tables sometimes report in thousands, sometimes in millions. Currency symbols may or may not be present. A general-purpose number extractor will get this wrong constantly.
 
-**4. Embedded tables break naive parsers.** Financial statements appear as HTML tables in XBRL-tagged documents, as text-rendered tables in plain-text filings, and as embedded PDF structures. A RegEx that works on one format fails on the next.
+**4. Untagged tables break naive parsers.** Not all financial tables are iXBRL-tagged. Text-rendered tables in plain-text filings and non-GAAP reconciliation tables often lack machine-readable markup entirely.
 
-**5. Amended filings create duplicates.** When a company files a 10-K/A (amended annual report), it supersedes the original. Systems that don't track amendment chains will double-count or use stale figures.
+**5. Non-GAAP metrics are never tagged.** Companies frequently report adjusted EBITDA, free cash flow, and other non-standard metrics only in prose. These require LLM extraction.
 
-The industry solution has historically been proprietary data vendors (FactSet, Bloomberg, S&P Capital IQ) who employ human reviewers and expensive custom parsers. This pipeline shows that a fine-tuned open-source LLM, combined with structured post-processing, can match vendor-quality extraction at a fraction of the cost.
+For iXBRL-tagged facts — where the filer has already machine-labeled the number — deterministic extraction is both simpler and more reliable. That work belongs to the [sec-edgar-extraction-pipeline](https://github.com/A-Kuo/sec-edgar-extraction-pipeline). This repo picks up where tagging ends.
 
 ---
 
@@ -33,13 +35,15 @@ The industry solution has historically been proprietary data vendors (FactSet, B
 
 | Metric | Value | Comparison |
 |--------|-------|-----------|
-| Extraction Accuracy | 94% (fully correct JSON outputs) | — |
-| Field-Level Accuracy | 92–99% per field | — |
+| Extraction Accuracy | 94% (fully correct JSON outputs)* | — |
+| Field-Level Accuracy | 92–99% per field* | — |
 | Inference Latency (p50) | ~320 ms/doc | — |
 | Throughput | ~60 docs/min | — |
 | Memory Footprint | 7.2 GB (NF4 4-bit) | vs. 32 GB FP32 — 77% reduction |
 | Trainable Parameters | ~200M / 8B total | 2.5% of model |
 | Cost per Document | ~$0.003 (self-hosted) | vs. ~$0.50 via GPT-4 API — 167× reduction |
+
+*\*Measured on a synthetic test set generated from templates. Real-world accuracy on authentic EDGAR filings is unverified. See [MODEL_CARD.md](MODEL_CARD.md) for full limitations.*
 
 ---
 
@@ -353,6 +357,7 @@ make typecheck         # mypy
 
 | Repository | Role |
 |-----------|------|
+| [sec-edgar-extraction-pipeline](https://github.com/A-Kuo/sec-edgar-extraction-pipeline) | Upstream: EDGAR ingestion, iXBRL-tagged fact extraction, rate limiting, amendment chains. This repo consumes its filing documents and deterministic facts (`method='xbrl'`) |
 | [Transformer-Aspect-Based-Sentiment-Analysis](https://github.com/A-Kuo/Transformer-Aspect-Based-Sentiment-Analysis) | Receives MD&A text for aspect sentiment analysis |
 | [Financial-Economic-Ticker-Analyzer-Agent](https://github.com/A-Kuo/Financial-Economic-Ticker-Analyzer-Agent) | Receives extracted ticker for market intelligence enrichment |
 | [Agentic-Visualization-Framework](https://github.com/A-Kuo/Agentic-Visualization-Framework) | Receives structured output for dashboard generation |
