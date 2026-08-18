@@ -14,7 +14,7 @@ This file provides persistent context for AI coding agents working on this repos
 
 **Current status:** Iteration 1 complete. All 103 tests pass. Infrastructure uses synthetic SEC data. Iteration 2 is the active next milestone (see roadmap below).
 
-**Repository:** `https://github.com/akuo6/financial-llm`
+**Repository:** `https://github.com/A-Kuo/Fine-Tuned-SEC-Filing-Extraction-Pipeline`
 
 ---
 
