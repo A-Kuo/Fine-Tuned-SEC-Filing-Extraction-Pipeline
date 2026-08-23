@@ -49,8 +49,13 @@ data/*.jsonl
 # EDGAR downloads (reproducible via scripts/fetch_edgar.py)
 data/raw_edgar/
 
-# ─── Secrets ─────────────────────────────────────────────────────────────────
+# ─── Secrets (never commit real credentials) ─────────────────────────────────
 .env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
 
 # ─── OS ──────────────────────────────────────────────────────────────────────
 .DS_Store
