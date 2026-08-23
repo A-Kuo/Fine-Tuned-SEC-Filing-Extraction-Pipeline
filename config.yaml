@@ -4,6 +4,7 @@
 
 model:
   base_model: "meta-llama/Llama-3.1-8B"
+  # Local adapter path, used when MLFlow registry is unavailable (dev fallback)
   adapter_path: "models/llama-sec-v1"
   max_seq_length: 2048
   dtype: "float16"
@@ -43,6 +44,26 @@ training:
   fp16: true
   seed: 42
   output_dir: "models/llama-sec-v1"
+
+# Experiment tracking + model registry (DagsHub-hosted MLFlow)
+mlflow:
+  tracking_uri: "https://dagshub.com/A-Kuo/Fine-Tuned-SEC-Filing-Extraction-Pipeline.mlflow"
+  dagshub_repo_owner: "A-Kuo"
+  dagshub_repo_name: "Fine-Tuned-SEC-Filing-Extraction-Pipeline"
+  experiment_name: "sec-extraction-qlora"
+  run_name_prefix: "findoc-qlora"
+  registered_model_name: "sec-extraction-qlora"
+  # Which registry stage src/model.py loads at serving time (see model.model_stage)
+  serving_stage: "production"
+
+# Remote training compute (primary: Kaggle Notebooks w/ GPU; fallback: local GPU)
+kaggle:
+  # Kaggle dataset slug holding training data, e.g. "username/sec-filings-train"
+  dataset_id: ""
+  # Kaggle kernel slug used for remote training jobs, e.g. "username/findoc-qlora-train"
+  kernel_slug: ""
+  use_local_if_unavailable: true
+  local_fallback: "data/sec_filings_train.jsonl"
 
 serving:
   host: "0.0.0.0"

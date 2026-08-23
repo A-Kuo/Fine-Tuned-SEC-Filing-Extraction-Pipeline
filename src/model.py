@@ -14,8 +14,14 @@ Memory footprint at inference:
     LoRA adapter:   0.2 GB (or 0 if merged)
     KV cache:       ~0.5 GB (depends on batch size)
     Total:          ~7.4-7.9 GB
+
+Adapter source: the trained adapter is loaded from the DagsHub-hosted MLFlow
+model registry when available (config.yaml -> mlflow.serving_stage), falling
+back to the local adapter_path for offline/dev use.
 """
 
+import os
+import tempfile
 import time
 from pathlib import Path
 from typing import Optional
@@ -33,6 +39,53 @@ from transformers import (
 )
 
 from src.config import load_config
+
+
+def _resolve_adapter_path(config: dict, adapter_path: str) -> tuple[str, str]:
+    """Download the adapter from the MLFlow registry if configured; else use local path.
+
+    Returns (local_directory_path, version_label). MLFlow artifacts are
+    downloaded to a temp dir; the version label identifies the source
+    (registry model@stage, or local directory name) for logging/diagnostics.
+    """
+    mlflow_cfg = config.get("mlflow", {})
+    model_name = mlflow_cfg.get("registered_model_name")
+    stage = mlflow_cfg.get("serving_stage", "production")
+
+    if not model_name:
+        return adapter_path, Path(adapter_path).name
+
+    if not os.environ.get("DAGSHUB_USER_TOKEN"):
+        # Without a token, dagshub.init() falls back to an interactive browser
+        # OAuth flow that blocks for minutes and can't succeed in a container
+        # at startup — skip straight to the local adapter instead of hanging.
+        logger.warning(
+            "DAGSHUB_USER_TOKEN not set; skipping MLFlow registry, "
+            f"using local adapter: {adapter_path}"
+        )
+        return adapter_path, Path(adapter_path).name
+
+    try:
+        import dagshub
+        import mlflow
+
+        dagshub.init(
+            repo_owner=mlflow_cfg["dagshub_repo_owner"],
+            repo_name=mlflow_cfg["dagshub_repo_name"],
+            mlflow=True,
+        )
+        model_uri = f"models:/{model_name}/{stage}"
+        dest_dir = tempfile.mkdtemp(prefix="mlflow_adapter_")
+        logger.info(f"Loading adapter from MLFlow registry: {model_uri}")
+        local_path = mlflow.artifacts.download_artifacts(
+            artifact_uri=model_uri, dst_path=dest_dir
+        )
+        return local_path, f"{model_name}@{stage}"
+    except Exception as e:
+        logger.warning(
+            f"MLFlow adapter load failed ({e}); falling back to local path: {adapter_path}"
+        )
+        return adapter_path, Path(adapter_path).name
 
 
 class FinancialLLM:
@@ -79,6 +132,7 @@ class FinancialLLM:
         config = load_config()
         base_model_id = base_model_id or config["model"]["base_model"]
         adapter_path = adapter_path or config["model"]["adapter_path"]
+        adapter_path, adapter_version = _resolve_adapter_path(config, adapter_path)
 
         logger.info(f"Loading model: {base_model_id}")
         logger.info(f"Adapter: {adapter_path}")
@@ -138,7 +192,7 @@ class FinancialLLM:
         )
 
         instance = cls(model, tokenizer, gen_config, device)
-        instance._model_version = f"llama-sec-v1-{adapter_path.split('/')[-1]}"
+        instance._model_version = f"llama-sec-v1-{adapter_version}"
 
         mem_mb = torch.cuda.memory_allocated() / 1e6 if torch.cuda.is_available() else 0
         logger.info(f"Model ready. GPU memory: {mem_mb:.0f} MB")

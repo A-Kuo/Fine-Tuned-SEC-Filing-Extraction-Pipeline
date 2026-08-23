@@ -236,6 +236,8 @@ pip install -r requirements.txt
 
 cp .env.example .env
 # Add your HuggingFace token (for Llama 3.1 access)
+# Add DAGSHUB_USER_TOKEN if you'll be training (MLFlow experiment tracking)
+# Add KAGGLE_USERNAME/KAGGLE_KEY if you'll use Kaggle for remote training compute
 
 make infra-up       # Start PostgreSQL + Redis (Docker required)
 make db-init        # Initialize schema
@@ -280,11 +282,27 @@ python serving/batch_inference.py \
 
 ### Training (requires GPU)
 
+Experiment tracking and the model registry run on MLFlow, hosted by
+[DagsHub](https://dagshub.com/A-Kuo/Fine-Tuned-SEC-Filing-Extraction-Pipeline).
+Every training run — local or remote — logs hyperparameters, metrics, and the
+resulting adapter to the same experiment.
+
+**Local GPU (fallback path):**
+
 ```bash
 python scripts/download_model.py     # ~16 GB, requires HF_TOKEN
 
 make train
 # Output: models/llama-sec-v1/ (LoRA adapters only, ~500 MB)
+# Run also logged to MLFlow: make train-mlflow-ui
+```
+
+**Kaggle Notebooks (primary remote compute):**
+
+```bash
+make train-kaggle
+# Pushes scripts/kaggle_kernel/ to Kaggle, trains on a GPU-enabled kernel,
+# and logs to the same MLFlow experiment as local runs.
 ```
 
 Or use the Colab notebooks for GPU-accelerated training without local hardware:
