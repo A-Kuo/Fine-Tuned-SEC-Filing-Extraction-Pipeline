@@ -60,8 +60,8 @@ mlflow:
 kaggle:
   # Kaggle dataset slug holding training data, e.g. "username/sec-filings-train"
   dataset_id: ""
-  # Kaggle kernel slug used for remote training jobs, e.g. "username/findoc-qlora-train"
-  kernel_slug: ""
+  # Kaggle kernel slug used for remote training jobs
+  kernel_slug: "augustinekuo/train-kernel"
   use_local_if_unavailable: true
   local_fallback: "data/sec_filings_train.jsonl"
 
