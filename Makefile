@@ -1,4 +1,5 @@
-.PHONY: test test-verbose lint format data train serve serve-vllm serve-pipeline \
+.PHONY: test test-verbose lint format data train train-kaggle train-mlflow-ui \
+        serve serve-vllm serve-pipeline \
         monitor benchmark evaluate dashboard \
         infra-up infra-down db-init \
         pipeline-up pipeline-down pipeline-status pipeline-logs \
@@ -38,8 +39,14 @@ fetch-edgar:  ## Fetch real SEC filings (respects SEC rate limits; set EDGAR tic
 
 # ─── Training ────────────────────────────────────────────────────────────────
 
-train:  ## Fine-tune model with QLoRA
+train:  ## Fine-tune model with QLoRA (local GPU; logs to MLFlow/DagsHub)
 	python training/train.py --num_epochs 3 --batch_size 8 --learning_rate 5e-4
+
+train-kaggle:  ## Submit QLoRA training job to Kaggle Notebooks (primary remote compute)
+	python scripts/submit_kaggle_job.py --wait
+
+train-mlflow-ui:  ## Open the MLFlow experiment tracking UI (DagsHub)
+	@echo "MLFlow UI: https://dagshub.com/A-Kuo/Fine-Tuned-SEC-Filing-Extraction-Pipeline.mlflow"
 
 # ─── Serving ─────────────────────────────────────────────────────────────────
 
