@@ -25,13 +25,23 @@ Usage:
     python training/train.py
     python training/train.py --num_epochs 5 --learning_rate 2e-4
     python training/train.py --model meta-llama/Llama-3.1-8B --dataset data/sec_filings_train.jsonl
+
+Runs locally by default (GPU required). Dataset is pulled from the Kaggle
+dataset configured in config.yaml -> kaggle.dataset_id when available,
+falling back to the local JSONL path otherwise. All runs are logged to
+MLFlow (tracking server hosted on DagsHub); see configure_mlflow(). To run
+training on Kaggle's hosted GPU compute instead, use
+scripts/submit_kaggle_job.py.
 """
 
 import argparse
 import json
+import os
 import sys
+from datetime import datetime
 from pathlib import Path
 
+import mlflow
 import torch
 from datasets import load_dataset
 from loguru import logger
@@ -53,6 +63,84 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from src.config import load_config, get_project_root
 from training.callbacks import MetricsCallback, EarlyStoppingOnLoss
 from training.data_collator import FinancialDataCollator
+
+
+def configure_mlflow(config: dict) -> None:
+    """Point MLFlow tracking at the DagsHub-hosted server for this repo.
+
+    DAGSHUB_USER_TOKEN (from .env) authenticates non-interactively via
+    dagshub.init(). Without it, dagshub.init() falls back to an interactive
+    browser OAuth flow that blocks for minutes and cannot succeed on a
+    headless box (e.g. a Kaggle kernel) — so that path is skipped entirely
+    when the token isn't set, going straight to unauthenticated tracking.
+    """
+    mlflow_cfg = config["mlflow"]
+
+    if os.environ.get("DAGSHUB_USER_TOKEN"):
+        try:
+            import dagshub
+
+            dagshub.init(
+                repo_owner=mlflow_cfg["dagshub_repo_owner"],
+                repo_name=mlflow_cfg["dagshub_repo_name"],
+                mlflow=True,
+            )
+            mlflow.set_experiment(mlflow_cfg["experiment_name"])
+            return
+        except Exception as e:
+            logger.warning(f"dagshub.init() failed ({e}); falling back to MLFLOW_TRACKING_URI")
+    else:
+        logger.warning(
+            "DAGSHUB_USER_TOKEN not set; skipping DagsHub auth. "
+            "Set it in .env to log runs to the shared MLFlow experiment."
+        )
+
+    mlflow.set_tracking_uri(mlflow_cfg["tracking_uri"])
+    mlflow.set_experiment(mlflow_cfg["experiment_name"])
+
+
+def resolve_dataset_path(config: dict, override_path: str | None = None) -> str:
+    """Resolve the training data path.
+
+    Primary source is Kaggle (config.kaggle.dataset_id); falls back to the
+    local JSONL path if Kaggle credentials/dataset are unavailable.
+    """
+    if override_path:
+        return override_path
+
+    kaggle_cfg = config["kaggle"]
+    dataset_id = kaggle_cfg.get("dataset_id")
+
+    if dataset_id:
+        try:
+            from kaggle.api.kaggle_api_extended import KaggleApi
+
+            api = KaggleApi()
+            api.authenticate()
+
+            dest_dir = get_project_root() / "data" / "kaggle_cache"
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            logger.info(f"Downloading training data from Kaggle dataset: {dataset_id}")
+            api.dataset_download_files(dataset_id, path=str(dest_dir), unzip=True)
+
+            jsonl_files = list(dest_dir.glob("*.jsonl"))
+            if jsonl_files:
+                return str(jsonl_files[0])
+            logger.warning(f"No .jsonl files found in Kaggle dataset {dataset_id}")
+        except (Exception, SystemExit) as e:
+            # kaggle's KaggleApi.authenticate() calls exit(1) (raises SystemExit,
+            # not Exception) when no credentials are configured — must catch both
+            # to fall back to local data instead of crashing training.
+            logger.warning(f"Kaggle dataset download failed ({e})")
+
+    if not kaggle_cfg.get("use_local_if_unavailable", True):
+        raise RuntimeError(
+            f"Kaggle dataset '{dataset_id}' unavailable and local fallback disabled."
+        )
+
+    local_path = kaggle_cfg["local_fallback"]
+    logger.info(f"Using local training data: {local_path}")
+    return local_path
 
 
 def create_bnb_config(config: dict) -> BitsAndBytesConfig:
@@ -229,7 +317,7 @@ def create_training_args(config: dict, output_dir: str) -> TrainingArguments:
         fp16=train_cfg["fp16"],
         seed=train_cfg["seed"],
         optim="paged_adamw_8bit",  # Memory-efficient optimizer for QLoRA
-        report_to="none",  # Disable wandb/tensorboard for prototype
+        report_to=["mlflow"],  # HF Trainer's built-in MLFlow callback logs params/metrics
         save_total_limit=3,
         load_best_model_at_end=False,
         gradient_checkpointing=True,
@@ -269,7 +357,7 @@ def train(
         config["training"]["learning_rate"] = learning_rate
 
     model_name = model_id or config["model"]["base_model"]
-    data_path = dataset_path or config["data"]["train_path"]
+    data_path = resolve_dataset_path(config, dataset_path)
     out_dir = output_dir or config["training"]["output_dir"]
     max_samp = max_samples or config["data"].get("max_train_samples")
 
@@ -285,66 +373,87 @@ def train(
     logger.info(f"LoRA rank:       {config['lora']['r']}")
     logger.info("=" * 60)
 
-    # ── Step 1: Quantization config ──
-    bnb_config = create_bnb_config(config)
+    configure_mlflow(config)
+    mlflow_cfg = config["mlflow"]
+    run_name = f"{mlflow_cfg['run_name_prefix']}-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}"
 
-    # ── Step 2: Load base model (4-bit) ──
-    model, tokenizer = load_base_model(
-        model_name,
-        bnb_config,
-        config["model"]["max_seq_length"],
-    )
+    with mlflow.start_run(run_name=run_name) as run:
+        mlflow.log_params({
+            "base_model": model_name,
+            "lora_r": config["lora"]["r"],
+            "lora_alpha": config["lora"]["lora_alpha"],
+            "lora_dropout": config["lora"]["lora_dropout"],
+            "compute_source": "kaggle" if config["kaggle"].get("dataset_id") else "local",
+        })
 
-    # ── Step 3: Inject LoRA adapters ──
-    lora_config = create_lora_config(config)
-    model = get_peft_model(model, lora_config)
+        # ── Step 1: Quantization config ──
+        bnb_config = create_bnb_config(config)
 
-    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    total = sum(p.numel() for p in model.parameters())
-    logger.info(
-        f"LoRA injected: {trainable / 1e6:.1f}M trainable / "
-        f"{total / 1e6:.0f}M total ({100 * trainable / total:.2f}%)"
-    )
+        # ── Step 2: Load base model (4-bit) ──
+        model, tokenizer = load_base_model(
+            model_name,
+            bnb_config,
+            config["model"]["max_seq_length"],
+        )
 
-    # ── Step 4: Load dataset ──
-    dataset = prepare_dataset(
-        data_path, tokenizer, config["model"]["max_seq_length"], max_samp
-    )
+        # ── Step 3: Inject LoRA adapters ──
+        lora_config = create_lora_config(config)
+        model = get_peft_model(model, lora_config)
 
-    # ── Step 5: Training arguments ──
-    training_args = create_training_args(config, out_dir)
+        trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        total = sum(p.numel() for p in model.parameters())
+        logger.info(
+            f"LoRA injected: {trainable / 1e6:.1f}M trainable / "
+            f"{total / 1e6:.0f}M total ({100 * trainable / total:.2f}%)"
+        )
 
-    # ── Step 6: SFTTrainer ──
-    trainer = SFTTrainer(
-        model=model,
-        args=training_args,
-        train_dataset=dataset,
-        processing_class=tokenizer,
-        max_seq_length=config["model"]["max_seq_length"],
-        callbacks=[
-            MetricsCallback(),
-            EarlyStoppingOnLoss(patience=5, min_delta=0.01),
-        ],
-    )
+        # ── Step 4: Load dataset ──
+        dataset = prepare_dataset(
+            data_path, tokenizer, config["model"]["max_seq_length"], max_samp
+        )
 
-    # ── Step 7: Train ──
-    logger.info("Starting training...")
-    train_result = trainer.train()
+        # ── Step 5: Training arguments ──
+        training_args = create_training_args(config, out_dir)
 
-    # ── Step 8: Save adapter ──
-    logger.info(f"Saving adapter to {out_dir}")
-    model.save_pretrained(out_dir)
-    tokenizer.save_pretrained(out_dir)
+        # ── Step 6: SFTTrainer ──
+        trainer = SFTTrainer(
+            model=model,
+            args=training_args,
+            train_dataset=dataset,
+            processing_class=tokenizer,
+            max_seq_length=config["model"]["max_seq_length"],
+            callbacks=[
+                MetricsCallback(),
+                EarlyStoppingOnLoss(patience=5, min_delta=0.01),
+            ],
+        )
 
-    # Save training metrics
-    metrics = train_result.metrics
-    metrics_path = Path(out_dir) / "training_metrics.json"
-    with open(metrics_path, "w") as f:
-        json.dump(metrics, f, indent=2)
+        # ── Step 7: Train ──
+        logger.info("Starting training...")
+        train_result = trainer.train()
+
+        # ── Step 8: Save adapter ──
+        logger.info(f"Saving adapter to {out_dir}")
+        model.save_pretrained(out_dir)
+        tokenizer.save_pretrained(out_dir)
+
+        # Save training metrics
+        metrics = train_result.metrics
+        metrics_path = Path(out_dir) / "training_metrics.json"
+        with open(metrics_path, "w") as f:
+            json.dump(metrics, f, indent=2)
+
+        # ── Step 9: Log adapter to MLFlow + register in model registry ──
+        mlflow.log_artifacts(out_dir, artifact_path="adapter")
+        mlflow.register_model(
+            f"runs:/{run.info.run_id}/adapter",
+            name=mlflow_cfg["registered_model_name"],
+        )
 
     logger.info(f"Training complete. Metrics: {metrics}")
     logger.info(f"Adapter saved to: {out_dir}")
     logger.info(f"Adapter size: {sum(f.stat().st_size for f in Path(out_dir).rglob('*') if f.is_file()) / 1e6:.1f} MB")
+    logger.info(f"MLFlow run: {mlflow_cfg['tracking_uri']}")
 
     return metrics
 

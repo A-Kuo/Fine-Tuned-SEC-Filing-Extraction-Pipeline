@@ -61,6 +61,9 @@ def _apply_env_overrides(config: dict) -> None:
         "WEBHOOK_SIGNING_SECRET": ("security", "webhook_signing_secret"),
         "LOG_FORMAT": ("logging", "format"),
         "LOG_LEVEL": ("logging", "level"),
+        "MLFLOW_TRACKING_URI": ("mlflow", "tracking_uri"),
+        "KAGGLE_USERNAME": ("kaggle", "username"),
+        "KAGGLE_KEY": ("kaggle", "key"),
     }
 
     for env_var, key_path in env_map.items():
