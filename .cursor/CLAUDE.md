@@ -69,6 +69,8 @@ FinDocAnalyzer/
 │   ├── download_model.py       ← HuggingFace model download (requires HF_TOKEN in .env)
 │   ├── download_dataset.py     ← synthetic SEC filing generator (creates data/*.jsonl)
 │   ├── format_data.py          ← converts raw JSONL → Llama 3.1 chat template format
+│   ├── submit_kaggle_job.py    ← pushes scripts/kaggle_kernel/ to Kaggle, polls for completion
+│   ├── kaggle_kernel/          ← GPU kernel run on Kaggle (clones repo, runs training/train.py)
 │   └── init_db.sql             ← PostgreSQL DDL: extractions + audit_log tables
 │
 ├── tests/                      ← 103 tests, all run without GPU
@@ -138,7 +140,9 @@ make db-init            # initialize schema from scripts/init_db.sql
 make data               # generate + format synthetic training data
 
 # Training
-make train              # QLoRA fine-tune (requires GPU + downloaded model)
+make train              # QLoRA fine-tune locally (requires GPU + downloaded model); logs to MLFlow
+make train-kaggle       # Submit training job to Kaggle Notebooks (primary remote compute)
+make train-mlflow-ui    # Print the MLFlow (DagsHub) experiment tracking URL
 
 # Serving
 make serve              # uvicorn serving.api:app --host 0.0.0.0 --port 8000
@@ -174,6 +178,8 @@ make benchmark          # latency/throughput/memory
 | Label masking (IGNORE_INDEX=-100) on instruction tokens | Loss computed only on output JSON; prevents gradient waste on boilerplate |
 | Redis + PostgreSQL two-tier storage | Redis handles repeated lookups within 1-day TTL; Postgres for compliance audit trail |
 | Two-condition drift alert (threshold AND p<0.05) | Reduces false positives from normal daily variance |
+| MLFlow (via DagsHub) for tracking + registry | Replaced AWS SageMaker; no cloud training account needed, free tier fits project scale |
+| Kaggle Notebooks primary training compute, local GPU fallback | Free GPU quota; local GPU used when Kaggle is unavailable/rate-limited |
 
 ---
 
@@ -233,7 +239,7 @@ When editing notebooks, preserve the cell ordering and markdown section headers 
 ### Task List for Iteration 2
 
 - [ ] **EDGAR integration** — Add `scripts/fetch_edgar.py` using the [EDGAR full-text search API](https://efts.sec.gov/LATEST/search-index?q=%2210-K%22&dateRange=custom&startdt=2023-01-01&enddt=2024-12-31&forms=10-K). Key endpoint: `https://data.sec.gov/submissions/CIK{cik:010d}.json`. Rate limit: 10 req/sec. Use `User-Agent: FinDocAnalyzer contact@example.com` header (SEC requirement). Parse XBRL inline data for ground-truth numeric fields where available.
-- [ ] **Hyperparameter sweep** — Grid search over LoRA rank (8/16/32), learning rate (1e-4/5e-4/1e-3), and target modules (attention-only vs attention+FFN). Log to W&B or MLflow. Store sweep results in `results/sweep/`.
+- [ ] **Hyperparameter sweep** — Grid search over LoRA rank (8/16/32), learning rate (1e-4/5e-4/1e-3), and target modules (attention-only vs attention+FFN). Log each run to MLFlow (already wired via `training/train.py` -> `configure_mlflow()`). Store sweep results in `results/sweep/`.
 - [ ] **A/B testing framework** — `src/ab_router.py`: route extraction requests across two model versions (configurable split ratio), log per-version accuracy to PostgreSQL, expose `/ab/report` endpoint in `serving/api.py`.
 - [ ] **Grafana + Prometheus** — Add Prometheus scrape endpoint (already have `prometheus-client` in requirements). Add `docker-compose.yml` services for Prometheus + Grafana. Import pre-built Grafana dashboard for latency/accuracy panels.
 
@@ -277,6 +283,9 @@ Required in `.env` (copy from `.env.example`):
 HF_TOKEN=             # HuggingFace token for model download
 POSTGRES_PASSWORD=    # override default finllm_dev for non-dev environments
 ALERT_EMAIL=          # optional: email address for drift alerts
+DAGSHUB_USER_TOKEN=   # authenticates MLFlow tracking to DagsHub (training only)
+KAGGLE_USERNAME=      # Kaggle API auth (only needed for `make train-kaggle`)
+KAGGLE_KEY=           # Kaggle API auth (only needed for `make train-kaggle`)
 ```
 
 ---
