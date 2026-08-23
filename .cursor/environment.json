@@ -1,0 +1,17 @@
+{
+  "name": "FinDocAnalyzer Dev",
+  "install": "python3 -m pip install --upgrade pip\npip install -r requirements-ci.txt\npython3 scripts/download_dataset.py\npython3 scripts/format_data.py --input data/sec_filings_train.jsonl --format chat",
+  "ports": [
+    {
+      "name": "api",
+      "port": 8000
+    }
+  ],
+  "terminals": [
+    {
+      "name": "api",
+      "command": "python3 -m uvicorn serving.api:app --host 0.0.0.0 --port 8000",
+      "description": "FastAPI extraction API — /health, /docs, POST /extract (needs GPU + model weights)"
+    }
+  ]
+}

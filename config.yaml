@@ -62,6 +62,8 @@ kaggle:
   dataset_id: ""
   # Kaggle kernel slug used for remote training jobs
   kernel_slug: "augustinekuo/train-kernel"
+  # Kaggle kernel slug used for remote training jobs, e.g. "username/findoc-qlora-train"
+  kernel_slug: "augustinekuo/findoc-qlora-train"
   use_local_if_unavailable: true
   local_fallback: "data/sec_filings_train.jsonl"
 
