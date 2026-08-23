@@ -22,6 +22,7 @@ services:
       - "8001:8001"  # vLLM (optional)
     environment:
       - HF_TOKEN=${HF_TOKEN}
+      - DAGSHUB_USER_TOKEN=${DAGSHUB_USER_TOKEN}  # MLFlow registry access; unset = uses local ./models fallback
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
       - POSTGRES_USER=finllm
