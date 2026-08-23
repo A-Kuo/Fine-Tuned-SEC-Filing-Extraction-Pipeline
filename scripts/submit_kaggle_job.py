@@ -54,9 +54,9 @@ def _get_kaggle_api():
         # our more specific guidance is shown too.
         raise SystemExit(
             f"Kaggle authentication failed ({e}).\n"
-            "Set KAGGLE_USERNAME + KAGGLE_KEY in .env, or place credentials "
-            "at ~/.kaggle/kaggle.json. Falling back to local training is "
-            "recommended: make train"
+            "Set KAGGLE_API_TOKEN in .env (kaggle.com/settings -> API), or "
+            "KAGGLE_USERNAME + KAGGLE_KEY in .env / ~/.kaggle/kaggle.json. "
+            "To sync Kaggle editor -> repo first: make pull-kaggle-kernel"
         )
     return api
 

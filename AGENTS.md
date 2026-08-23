@@ -31,6 +31,7 @@ curl localhost:8000/health   # when API terminal is running
 
 ### Training (Kaggle vs local)
 
+- **Sync Kaggle editor → repo (do this first if you edited on Kaggle):** `make pull-kaggle-kernel` (needs `KAGGLE_API_TOKEN` in `.env`). Then commit the updated `scripts/kaggle_kernel/train_kernel.py`.
 - **Do not run `make train-kaggle` from Cloud Agents** unless the user explicitly wants to overwrite the remote kernel. `scripts/submit_kaggle_job.py` runs `kaggle kernels push`, which **replaces** whatever is currently in the Kaggle kernel (`augustinekuo/findoc-qlora-train`) with `scripts/kaggle_kernel/train_kernel.py` + `kernel-metadata.json` from this repo.
 - **Source of truth:** If the user has custom logic in the Kaggle editor (e.g. `/edit/run/...`), pull that into `scripts/kaggle_kernel/train_kernel.py` *before* the next push, or confirm the repo file is authoritative.
 - **Kaggle Notebook secrets** (Add-ons → Secrets, not files): `DAGSHUB_USER_TOKEN`, `HF_TOKEN`. The repo kernel loads these via `kaggle_secrets.UserSecretsClient`.

@@ -1,4 +1,4 @@
-.PHONY: test test-verbose lint format data train train-kaggle train-mlflow-ui \
+.PHONY: test test-verbose lint format data train train-kaggle pull-kaggle-kernel train-mlflow-ui \
         serve serve-vllm serve-pipeline \
         monitor benchmark evaluate dashboard \
         infra-up infra-down db-init \
@@ -44,6 +44,9 @@ train:  ## Fine-tune model with QLoRA (local GPU; logs to MLFlow/DagsHub)
 
 train-kaggle:  ## Submit QLoRA training job to Kaggle Notebooks (primary remote compute)
 	python scripts/submit_kaggle_job.py --wait
+
+pull-kaggle-kernel:  ## Pull kernel source from Kaggle into scripts/kaggle_kernel/ (sync editor -> repo)
+	python scripts/pull_kaggle_kernel.py
 
 train-mlflow-ui:  ## Open the MLFlow experiment tracking UI (DagsHub)
 	@echo "MLFlow UI: https://dagshub.com/A-Kuo/Fine-Tuned-SEC-Filing-Extraction-Pipeline.mlflow"
