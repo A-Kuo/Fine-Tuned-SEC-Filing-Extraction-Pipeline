@@ -1,5 +1,5 @@
 {
-  "id": "REPLACE_WITH_YOUR_KAGGLE_USERNAME/findoc-qlora-train",
+  "id": "augustinekuo/findoc-qlora-train",
   "title": "FinDoc QLoRA Training",
   "code_file": "train_kernel.py",
   "language": "python",
