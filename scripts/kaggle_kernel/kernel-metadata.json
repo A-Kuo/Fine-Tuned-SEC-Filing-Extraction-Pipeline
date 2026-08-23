@@ -1,4 +1,6 @@
 {
+  "id": "augustinekuo/train-kernel",
+  "title": "train-kernel",
   "id": "augustinekuo/findoc-qlora-train",
   "title": "FinDoc QLoRA Training",
   "code_file": "train_kernel.py",
