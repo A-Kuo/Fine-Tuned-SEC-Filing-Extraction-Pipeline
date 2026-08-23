@@ -16,6 +16,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Block committed secret files
+        run: |
+          set -euo pipefail
+          if git ls-files --error-unmatch .env >/dev/null 2>&1; then
+            echo "::error::.env must not be committed. Remove it from git history."
+            exit 1
+          fi
+          leaked="$(git ls-files '.env.*' | grep -v '^\.env\.example$' || true)"
+          if [ -n "$leaked" ]; then
+            echo "::error::Secret env files must not be committed: $leaked"
+            exit 1
+          fi
+
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:

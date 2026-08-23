@@ -1,0 +1,30 @@
+# Secrets and local config — never bake into images
+.env
+.env.*
+!.env.example
+
+# VCS and IDE
+.git
+.gitignore
+.github
+.cursor
+.idea
+.vscode
+
+# Python / test artifacts
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+htmlcov/
+.coverage
+
+# Large or generated artifacts
+models/
+results/
+data/*.jsonl
+data/raw_edgar/
+notebooks/
