@@ -28,3 +28,11 @@ curl localhost:8000/health   # when API terminal is running
 - `/extract` lazy-loads the model and needs `torch`, GPU, and downloaded weights (`HF_TOKEN` + `scripts/download_model.py`). `/health` works without a model.
 - `make db-init` uses user `postgres` but compose creates `finllm` — schema is auto-applied via `docker-entrypoint-initdb.d` on first `infra-up`.
 - Do not commit `.env` or force-add secrets; CI blocks tracked `.env*` files except `.env.example`.
+
+### Training (Kaggle vs local)
+
+- **Do not run `make train-kaggle` from Cloud Agents** unless the user explicitly wants to overwrite the remote kernel. `scripts/submit_kaggle_job.py` runs `kaggle kernels push`, which **replaces** whatever is currently in the Kaggle kernel (`augustinekuo/findoc-qlora-train`) with `scripts/kaggle_kernel/train_kernel.py` + `kernel-metadata.json` from this repo.
+- **Source of truth:** If the user has custom logic in the Kaggle editor (e.g. `/edit/run/...`), pull that into `scripts/kaggle_kernel/train_kernel.py` *before* the next push, or confirm the repo file is authoritative.
+- **Kaggle Notebook secrets** (Add-ons → Secrets, not files): `DAGSHUB_USER_TOKEN`, `HF_TOKEN`. The repo kernel loads these via `kaggle_secrets.UserSecretsClient`.
+- **Local GPU path:** `make train` on a machine with CUDA + `.env` (repo root). Prefer the user's own machine for training; this Cloud VM is typically CPU-only and has no Docker.
+- Repo kernel behavior: clones this GitHub repo, `pip install -r requirements.txt`, runs `training/train.py` (same path as local; logs to DagsHub/MLFlow).
