@@ -184,7 +184,10 @@ def validate_formatted_data(path: Path, fmt: str, num_check: int = 5) -> bool:
 
 def main():
     parser = argparse.ArgumentParser(description="Format data for fine-tuning")
-    parser.add_argument("--input", type=str, required=True, help="Input JSONL path")
+    parser.add_argument(
+        "--input", type=str, default=None,
+        help="Input JSONL path (default: config.yaml -> data.train_path)",
+    )
     parser.add_argument(
         "--output", type=str, default=None,
         help="Output JSONL path (default: input with format suffix)",
@@ -197,7 +200,8 @@ def main():
     parser.add_argument("--validate", action="store_true", help="Validate output after formatting")
     args = parser.parse_args()
 
-    input_path = Path(args.input)
+    input_arg = args.input or load_config()["data"]["train_path"]
+    input_path = Path(input_arg)
     if not input_path.exists():
         console.print(f"[red]Input file not found: {input_path}[/red]")
         sys.exit(1)

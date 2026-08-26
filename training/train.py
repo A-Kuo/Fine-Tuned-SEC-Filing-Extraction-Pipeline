@@ -219,7 +219,11 @@ def load_base_model(
     model = AutoModelForCausalLM.from_pretrained(
         model_id,
         quantization_config=bnb_config,
-        torch_dtype=torch.bfloat16,
+        # Match the outer dtype to bnb_4bit_compute_dtype (fp16 by default).
+        # T4/older GPUs have no native bf16 tensor cores; loading in bf16
+        # while quantization computes in fp16 and the trainer runs fp16 AMP
+        # creates a 3-way dtype mismatch that inflates memory and can OOM.
+        torch_dtype=bnb_config.bnb_4bit_compute_dtype,
         device_map="auto",
         attn_implementation="sdpa",  # <-- force non-flash attention
         # max_seq_length is usually passed via config, not as a kwarg

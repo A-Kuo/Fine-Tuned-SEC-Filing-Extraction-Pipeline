@@ -281,11 +281,16 @@ class ExtractionEngine:
             {"role": "user", "content": f"{EXTRACTION_INSTRUCTION}\n\n{filing_text}"},
         ]
 
-        # Apply chat template (adds special tokens for Llama 3.1)
-        prompt = self.model.tokenizer.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=True
-        )
-        return prompt
+        if getattr(self.model.tokenizer, "chat_template", None):
+            # Apply chat template (adds special tokens for Llama 3.1 Instruct)
+            return self.model.tokenizer.apply_chat_template(
+                messages, tokenize=False, add_generation_prompt=True
+            )
+
+        # Base (non-instruct) checkpoints like meta-llama/Llama-3.1-8B ship no
+        # chat template -- fall back to a plain instruction-style prompt so
+        # extraction still works instead of raising on every call.
+        return f"{SYSTEM_PROMPT}\n\n{EXTRACTION_INSTRUCTION}\n\n{filing_text}\n\nResponse:"
 
     def _estimate_confidence(
         self,
