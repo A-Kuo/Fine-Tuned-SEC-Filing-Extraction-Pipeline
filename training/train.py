@@ -296,18 +296,29 @@ def formatting_func(example: dict) -> str:
     )
 
 
-def create_training_args(config: dict, output_dir: str) -> TrainingArguments:
-    """Create HuggingFace TrainingArguments from config."""
+from trl import SFTConfig
+
+def create_training_args(config: dict, output_dir: str) -> SFTConfig:
+    """Create TRL SFTConfig from config."""
     train_cfg = config["training"]
 
-    return TrainingArguments(
+    # Option A: fixed warmup steps from config (if you add it)
+    warmup_steps = train_cfg.get("warmup_steps", 0)
+
+    # Option B (optional): derive warmup_steps from warmup_ratio if you want
+    # total_steps = train_cfg["num_epochs"] * math.ceil(
+    #     train_cfg["num_train_examples"] / (train_cfg["batch_size"] * train_cfg["gradient_accumulation_steps"])
+    # )
+    # warmup_steps = int(total_steps * train_cfg.get("warmup_ratio", 0.0))
+
+    return SFTConfig(
         output_dir=output_dir,
         num_train_epochs=train_cfg["num_epochs"],
         per_device_train_batch_size=train_cfg["batch_size"],
         gradient_accumulation_steps=train_cfg["gradient_accumulation_steps"],
         learning_rate=train_cfg["learning_rate"],
         weight_decay=train_cfg["weight_decay"],
-        warmup_ratio=train_cfg["warmup_ratio"],
+        warmup_steps=warmup_steps,                      # <- use steps, not ratio
         lr_scheduler_type=train_cfg["lr_scheduler_type"],
         max_grad_norm=train_cfg["max_grad_norm"],
         logging_steps=train_cfg["logging_steps"],
@@ -315,13 +326,16 @@ def create_training_args(config: dict, output_dir: str) -> TrainingArguments:
         eval_steps=train_cfg["eval_steps"],
         fp16=train_cfg["fp16"],
         seed=train_cfg["seed"],
-        optim="paged_adamw_8bit",  # Memory-efficient optimizer for QLoRA
-        report_to=["mlflow"],  # HF Trainer's built-in MLFlow callback logs params/metrics
+        optim="paged_adamw_8bit",                      # QLoRA-friendly optimizer
+        report_to=["mlflow"],
         save_total_limit=3,
         load_best_model_at_end=False,
         gradient_checkpointing=True,
         gradient_checkpointing_kwargs={"use_reentrant": False},
         remove_unused_columns=False,
+
+        # NEW: control sequence length here
+        max_length=config["model"]["max_seq_length"],  # <- key fix
     )
 
 
@@ -420,7 +434,6 @@ def train(
             args=training_args,
             train_dataset=dataset,
             processing_class=tokenizer,
-            max_seq_length=config["model"]["max_seq_length"],
             callbacks=[
                 MetricsCallback(),
                 EarlyStoppingOnLoss(patience=5, min_delta=0.01),
