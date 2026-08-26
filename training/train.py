@@ -219,11 +219,10 @@ def load_base_model(
     model = AutoModelForCausalLM.from_pretrained(
         model_id,
         quantization_config=bnb_config,
+        torch_dtype=torch.bfloat16,
         device_map="auto",
-        torch_dtype=torch.float16,
-        attn_implementation="flash_attention_2"
-        if torch.cuda.is_available()
-        else "eager",
+        attn_implementation="sdpa",  # <-- force non-flash attention
+        # max_seq_length is usually passed via config, not as a kwarg
     )
 
     # Prepare model for k-bit training:
