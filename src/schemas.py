@@ -7,10 +7,12 @@ from typing import Literal
 class FilingMetadata(BaseModel):
     filing_id: str
     cik: str | None = None
+    accession_no: str | None = None
     ticker: str | None = None
     company_name: str | None = None
     filing_type: Literal["10-K", "10-Q", "S-1"] | str
     filing_date: str | None = None
+    raw_text_hash: str | None = None
 
 
 class SectionRecord(BaseModel):
@@ -32,6 +34,7 @@ class MetricRecord(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0)
     source_section: str | None = None
     evidence_text: str | None = None
+    model_version: str | None = None
 
 
 class RiskFactorRecord(BaseModel):
@@ -40,9 +43,15 @@ class RiskFactorRecord(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0)
 
 
+class MdnaSummaryRecord(BaseModel):
+    summary: str
+    method: Literal["heuristic", "llm"] = "heuristic"
+    model_version: str | None = None
+
+
 class FilingRecord(BaseModel):
     metadata: FilingMetadata
     sections: list[SectionRecord]
     metrics: list[MetricRecord]
     risk_factors: list[RiskFactorRecord]
-    mdna_summary: str | None = None
+    mdna: MdnaSummaryRecord | None = None
