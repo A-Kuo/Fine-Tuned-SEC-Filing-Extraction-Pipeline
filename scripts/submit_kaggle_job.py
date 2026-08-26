@@ -54,8 +54,8 @@ def _get_kaggle_api():
         # our more specific guidance is shown too.
         raise SystemExit(
             f"Kaggle authentication failed ({e}).\n"
-            "Set KAGGLE_API_TOKEN in .env (kaggle.com/settings -> API), or "
-            "KAGGLE_USERNAME + KAGGLE_KEY in .env / ~/.kaggle/kaggle.json. "
+            "Set KAGGLE_USERNAME + KAGGLE_KEY in .env / ~/.kaggle/kaggle.json "
+            "(kaggle.com/settings -> API -> Create New Token). "
             "To sync Kaggle editor -> repo first: make pull-kaggle-kernel. "
             "For local fallback, run: make train"
         )
@@ -124,7 +124,9 @@ def main() -> None:
         push_kernel(api, config)
 
     if args.wait or args.status_only:
-        poll_status(api, slug, args.poll_interval, args.timeout)
+        final_state = poll_status(api, slug, args.poll_interval, args.timeout)
+        if final_state != "complete":
+            sys.exit(1)
 
 
 if __name__ == "__main__":

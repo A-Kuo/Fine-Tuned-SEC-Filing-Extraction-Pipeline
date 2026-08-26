@@ -40,6 +40,10 @@ models/
 results/
 !results/.gitkeep
 
+# Raw Kaggle kernel output download (weights, logs) -- scratch only;
+# scripts/fetch_kaggle_results.py extracts metrics.json/plot from this.
+.kaggle_output/
+
 # Generated data (reproducible via scripts/download_dataset.py + format_data.py)
 data/*.jsonl
 # Keep sample reference files

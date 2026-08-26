@@ -1,0 +1,61 @@
+name: Kaggle QLoRA Training
+
+on:
+  workflow_dispatch:
+    inputs:
+      notes:
+        description: "Optional note for this training run"
+        required: false
+        default: ""
+  # Uncomment to enable automatic biweekly runs. NOTE: cron has no native
+  # biweekly primitive -- verify/adjust this before enabling (a plain weekly
+  # cron here would silently fire twice as often as intended):
+  # schedule:
+  #   - cron: "0 6 * * 1"
+
+permissions:
+  contents: write
+
+jobs:
+  train-on-kaggle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install kaggle pyyaml loguru python-dotenv matplotlib
+
+      - name: Submit training job to Kaggle and wait
+        env:
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+          KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+        run: python scripts/submit_kaggle_job.py --wait
+
+      - name: Fetch results from Kaggle
+        env:
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+          KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+        run: python scripts/fetch_kaggle_results.py --status complete
+
+      - name: Upload full raw output (weights, logs) as workflow artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kaggle-training-output
+          path: .kaggle_output/
+          retention-days: 14
+
+      - name: Commit results to repo
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add notebooks/results/
+          git commit -m "Automated Kaggle training results [skip ci]" || exit 0
+          git push

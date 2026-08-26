@@ -3,12 +3,9 @@
 Use this before editing train_kernel.py locally so the repo matches what is
 already on Kaggle (avoids make train-kaggle clobbering editor changes).
 
-Requires Kaggle API auth. The modern CLI prefers:
-  - KAGGLE_API_TOKEN in .env (from kaggle.com/settings -> API -> Generate New Token)
-  - or: kaggle auth login (OAuth, interactive)
-
-Legacy KAGGLE_USERNAME + KAGGLE_KEY in ~/.kaggle/kaggle.json may return 401/403
-on newer API endpoints.
+Requires Kaggle API auth: KAGGLE_USERNAME + KAGGLE_KEY in .env (or
+~/.kaggle/kaggle.json), generated at kaggle.com/settings -> API -> Create
+New Token.
 
 Usage:
     python scripts/pull_kaggle_kernel.py
