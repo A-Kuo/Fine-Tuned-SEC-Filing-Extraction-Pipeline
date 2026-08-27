@@ -14,7 +14,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.inference import ExtractionEngine
+from src.chat_template import LLAMA31_CHAT_TEMPLATE
+from src.inference import EXTRACTION_INSTRUCTION, SYSTEM_PROMPT, ExtractionEngine
 
 
 def _make_engine(chat_template):
@@ -47,6 +48,43 @@ class TestBuildPrompt:
         engine = _make_engine(chat_template="")
         prompt = engine._build_prompt("filing text here")
         assert "filing text here" in prompt
+
+
+class TestRealTemplateIsUsed:
+    """The repo installs LLAMA31_CHAT_TEMPLATE on base checkpoints, so the
+    template branch -- not the fallback -- is what actually runs in production.
+    """
+
+    def test_build_prompt_matches_the_shared_template(self):
+        from jinja2 import Template
+
+        rendered = {}
+
+        def apply(messages, tokenize, add_generation_prompt):
+            rendered["out"] = Template(LLAMA31_CHAT_TEMPLATE).render(
+                messages=messages, add_generation_prompt=add_generation_prompt
+            )
+            return rendered["out"]
+
+        tokenizer = SimpleNamespace(
+            chat_template=LLAMA31_CHAT_TEMPLATE, apply_chat_template=apply
+        )
+        engine = ExtractionEngine(model=SimpleNamespace(tokenizer=tokenizer))
+
+        prompt = engine._build_prompt("ACME 10-K body")
+
+        expected = Template(LLAMA31_CHAT_TEMPLATE).render(
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {
+                    "role": "user",
+                    "content": f"{EXTRACTION_INSTRUCTION}\n\nACME 10-K body",
+                },
+            ],
+            add_generation_prompt=True,
+        )
+        assert prompt == expected
+        assert prompt.endswith("<|start_header_id|>assistant<|end_header_id|>\n\n")
 
 
 if __name__ == "__main__":

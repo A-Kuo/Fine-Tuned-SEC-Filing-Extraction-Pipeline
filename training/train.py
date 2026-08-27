@@ -35,6 +35,7 @@ scripts/submit_kaggle_job.py.
 """
 
 import argparse
+import inspect
 import json
 import os
 import sys
@@ -57,10 +58,11 @@ from transformers import (
     BitsAndBytesConfig,
     TrainingArguments,
 )
-from trl import SFTTrainer
+from trl import SFTConfig, SFTTrainer
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from src.config import load_config, get_project_root
+from src.chat_template import ensure_chat_template
 from training.callbacks import MetricsCallback, EarlyStoppingOnLoss
 from training.data_collator import FinancialDataCollator
 
@@ -192,6 +194,24 @@ def create_lora_config(config: dict) -> LoraConfig:
     )
 
 
+def single_device_map() -> dict | None:
+    """Device map that pins the whole model to one GPU.
+
+    `device_map="auto"` shards an 8B model across *every* visible GPU. On
+    Kaggle's 2xT4 runtime that leaves half the layers on cuda:1, and a
+    bitsandbytes-quantized model split that way cannot be trained: HF Trainer
+    wraps any run that sees >1 GPU in `nn.DataParallel`, which then replicates
+    batches onto cuda:1 and dies with "Expected all tensors to be on the same
+    device, but found at least two devices, cuda:1 and cuda:0".
+
+    An NF4-quantized 8B model fits in a single 16 GB T4, so pinning is both
+    correct and sufficient. See also the `_n_gpu` override in
+    create_training_args() -- both are needed, because CUDA_VISIBLE_DEVICES
+    has no effect once torch has already initialised CUDA.
+    """
+    return {"": 0} if torch.cuda.is_available() else None
+
+
 def load_base_model(
     model_id: str,
     bnb_config: BitsAndBytesConfig,
@@ -216,6 +236,13 @@ def load_base_model(
         tokenizer.pad_token = tokenizer.eos_token
         tokenizer.pad_token_id = tokenizer.eos_token_id
 
+    # The base (non-Instruct) checkpoint ships no chat template, so SFTTrainer
+    # raises the moment it tries to render the `messages` column. Install the
+    # shared one -- inference applies the identical template, which is what
+    # keeps the trained prompt shape and the served prompt shape in sync.
+    if ensure_chat_template(tokenizer):
+        logger.info("Installed Llama 3.1 chat template (base checkpoint had none)")
+
     model = AutoModelForCausalLM.from_pretrained(
         model_id,
         quantization_config=bnb_config,
@@ -224,7 +251,7 @@ def load_base_model(
         # while quantization computes in fp16 and the trainer runs fp16 AMP
         # creates a 3-way dtype mismatch that inflates memory and can OOM.
         torch_dtype=bnb_config.bnb_4bit_compute_dtype,
-        device_map="auto",
+        device_map=single_device_map(),
         attn_implementation="sdpa",  # <-- force non-flash attention
         # max_seq_length is usually passed via config, not as a kwarg
     )
@@ -277,6 +304,31 @@ def prepare_dataset(
     return dataset
 
 
+def to_text_dataset(dataset, tokenizer):
+    """Render conversational rows into a single `text` column.
+
+    SFTTrainer can auto-detect a `messages` column, but *when* and *how* it
+    applies the chat template changed repeatedly across TRL versions. Rendering
+    it ourselves makes the exact training string explicit and identical on
+    every version -- and it is rendered with the same template
+    ExtractionEngine uses at inference, so the two cannot drift apart.
+    """
+    if "text" in dataset.column_names:
+        return dataset
+
+    if "messages" not in dataset.column_names:
+        raise ValueError(
+            f"Dataset has neither a 'text' nor a 'messages' column "
+            f"(found: {dataset.column_names}). Run scripts/format_data.py."
+        )
+
+    def _render(example):
+        return {"text": tokenizer.apply_chat_template(example["messages"], tokenize=False)}
+
+    # Drop the original columns: only `text` should reach the collator.
+    return dataset.map(_render, remove_columns=dataset.column_names)
+
+
 def formatting_func(example: dict) -> str:
     """Format a single example for SFTTrainer.
 
@@ -300,40 +352,65 @@ def formatting_func(example: dict) -> str:
     )
 
 
-from trl import SFTConfig
-
-from trl import SFTConfig
-
 def create_training_args(config: dict, output_dir: str) -> SFTConfig:
+    """Build the SFTConfig, tolerating TRL's renamed arguments.
+
+    TRL renamed SFTConfig's `max_seq_length` to `max_length`; which spelling is
+    valid depends on the installed version, and Kaggle's image drifts
+    independently of this repo. Rather than pin a version (or monkeypatch the
+    file at runtime), candidate kwargs are filtered against the real signature
+    so the same code runs against either.
+    """
     train_cfg = config["training"]
+    max_seq_length = config["model"]["max_seq_length"]
 
-    # choose a warmup strategy
-    warmup_steps = train_cfg.get("warmup_steps", 0)
+    # MLflow tracking points at the DagsHub-hosted server, which needs a token.
+    # Without one the callback still fires on every logging step and fails, so
+    # on Kaggle (no token) we don't report at all.
+    report_to = ["mlflow"] if os.environ.get("DAGSHUB_USER_TOKEN") else []
 
-    return SFTConfig(
-        output_dir=output_dir,
-        num_train_epochs=train_cfg["num_epochs"],
-        per_device_train_batch_size=train_cfg["batch_size"],
-        gradient_accumulation_steps=train_cfg["gradient_accumulation_steps"],
-        learning_rate=train_cfg["learning_rate"],
-        weight_decay=train_cfg["weight_decay"],
-        warmup_steps=warmup_steps,                    # <- not warmup_ratio
-        lr_scheduler_type=train_cfg["lr_scheduler_type"],
-        max_grad_norm=train_cfg["max_grad_norm"],
-        logging_steps=train_cfg["logging_steps"],
-        save_steps=train_cfg["save_steps"],
-        eval_steps=train_cfg["eval_steps"],
-        fp16=train_cfg["fp16"],
-        seed=train_cfg["seed"],
-        optim="paged_adamw_8bit",
-        report_to=["mlflow"],
-        save_total_limit=3,
-        load_best_model_at_end=False,
-        gradient_checkpointing=True,
-        gradient_checkpointing_kwargs={"use_reentrant": False},
-        remove_unused_columns=False,
-        max_length=config["model"]["max_seq_length"],  # <- here, not in SFTTrainer
-    )
+    candidate_kwargs = {
+        "output_dir": output_dir,
+        "num_train_epochs": train_cfg["num_epochs"],
+        "per_device_train_batch_size": train_cfg["batch_size"],
+        "gradient_accumulation_steps": train_cfg["gradient_accumulation_steps"],
+        "learning_rate": float(train_cfg["learning_rate"]),
+        "weight_decay": train_cfg["weight_decay"],
+        "warmup_ratio": train_cfg.get("warmup_ratio", 0.0),
+        "lr_scheduler_type": train_cfg["lr_scheduler_type"],
+        "max_grad_norm": train_cfg["max_grad_norm"],
+        "logging_steps": train_cfg["logging_steps"],
+        "save_strategy": "epoch",
+        "save_total_limit": 3,
+        "load_best_model_at_end": False,
+        "fp16": train_cfg["fp16"],
+        "seed": train_cfg["seed"],
+        "optim": "paged_adamw_8bit",
+        "report_to": report_to,
+        "gradient_checkpointing": True,
+        "gradient_checkpointing_kwargs": {"use_reentrant": False},
+        "dataset_text_field": "text",
+        # TRL <0.20 spells this max_seq_length, >=0.20 spells it max_length.
+        # Exactly one survives the filter below.
+        "max_seq_length": max_seq_length,
+        "max_length": max_seq_length,
+    }
+
+    valid_params = inspect.signature(SFTConfig.__init__).parameters
+    args = SFTConfig(**{k: v for k, v in candidate_kwargs.items() if k in valid_params})
+
+    # Touch the property first so transformers populates _n_gpu, then force it
+    # to 1. Trainer wraps any run that reports >1 GPU in nn.DataParallel, which
+    # a 4-bit quantized model cannot survive: it scatters the batch onto every
+    # device (breaking a model pinned to cuda:0) and chokes on the 0-dim
+    # num_items_in_batch scalar with "chunk expects at least a 1-dimensional
+    # tensor". Setting CUDA_VISIBLE_DEVICES is *not* an alternative -- it has
+    # no effect once torch has already initialised CUDA, which any earlier
+    # torch.cuda call in a notebook will have done.
+    _ = args.n_gpu
+    args._n_gpu = 1
+
+    return args
 
 
 def train(
@@ -421,6 +498,7 @@ def train(
         dataset = prepare_dataset(
             data_path, tokenizer, config["model"]["max_seq_length"], max_samp
         )
+        dataset = to_text_dataset(dataset, tokenizer)
 
         # ── Step 5: Training arguments ──
         training_args = create_training_args(config, out_dir)

@@ -31,16 +31,24 @@ lora:
 
 training:
   num_epochs: 3
-  batch_size: 8
+  # Sized for a single 16 GB T4 (Kaggle's default GPU). An NF4 8B model plus
+  # the fp32 upcast peft applies to the embeddings/lm_head sits at ~11 GB
+  # resident, and the loss logits alone cost ~1 GB per sequence at
+  # max_seq_length 2048 (2048 x 128256 vocab x 4 bytes), so batch_size > 1
+  # OOMs. Raise both on a 40 GB A100.
+  batch_size: 1
+  # Effective batch = batch_size x this = 4. Kept deliberately small: the
+  # synthetic training set is only 90 examples, so the previous effective
+  # batch of 32 produced just 2 optimizer steps per epoch (6 for the whole
+  # run) -- far too few for the adapter to learn anything.
   gradient_accumulation_steps: 4
   learning_rate: 5.0e-4
   weight_decay: 0.01
   warmup_ratio: 0.03
   lr_scheduler_type: "cosine"
   max_grad_norm: 1.0
-  logging_steps: 10
-  save_steps: 200
-  eval_steps: 100
+  # At ~67 total steps, logging every 10 would yield a 6-point loss curve.
+  logging_steps: 1
   fp16: true
   seed: 42
   output_dir: "models/llama-sec-v1"

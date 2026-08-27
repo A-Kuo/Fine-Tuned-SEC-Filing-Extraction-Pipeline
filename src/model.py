@@ -38,6 +38,7 @@ from transformers import (
     GenerationConfig,
 )
 
+from src.chat_template import ensure_chat_template, generation_eos_token_ids
 from src.config import load_config
 
 
@@ -146,6 +147,12 @@ class FinancialLLM:
             tokenizer.pad_token = tokenizer.eos_token
             tokenizer.pad_token_id = tokenizer.eos_token_id
 
+        # Base (non-Instruct) checkpoints ship no chat template. Install the
+        # same one training uses, so the prompt the adapter was fine-tuned on
+        # and the prompt it is served is byte-identical.
+        if ensure_chat_template(tokenizer):
+            logger.info("Installed Llama 3.1 chat template (base checkpoint had none)")
+
         # Load base model with 4-bit quantization
         quant_config = config["quantization"]
         bnb_config = BitsAndBytesConfig(
@@ -188,7 +195,10 @@ class FinancialLLM:
             top_p=1.0,
             repetition_penalty=1.1,
             pad_token_id=tokenizer.pad_token_id,
-            eos_token_id=tokenizer.eos_token_id,
+            # A model trained on the chat template ends its answer with
+            # <|eot_id|>, not the base checkpoint's <|end_of_text|>. Without
+            # both, generation runs to max_new_tokens on every request.
+            eos_token_id=generation_eos_token_ids(tokenizer),
         )
 
         instance = cls(model, tokenizer, gen_config, device)
