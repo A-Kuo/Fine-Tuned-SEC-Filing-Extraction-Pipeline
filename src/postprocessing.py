@@ -5,7 +5,7 @@ JSON, but sometimes includes markdown fences, trailing text, partial objects,
 or hallucinated fields. This module robustly parses whatever the model produces.
 
 Key design decision: we validate but don't reject partial results. A filing
-with company_name + filing_type but missing revenue is still useful—we return
+with company_name + filing_type but missing revenue is still useful-—we return
 it with a lower confidence score and flag the missing fields. This is better
 than discarding the entire extraction.
 """
