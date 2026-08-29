@@ -45,6 +45,10 @@ For iXBRL-tagged facts — where the filer has already machine-labeled the numbe
 
 *\*Measured on a synthetic test set generated from templates. Real-world accuracy on authentic EDGAR filings is unverified. See [MODEL_CARD.md](MODEL_CARD.md) for full limitations.*
 
+See drift-monitoring dashboard for insight:
+
+https://warehouseduckdb-driftmonitordash-sec-finetunedpipeline.streamlit.app/
+
 ---
 
 ## The Fine-Tuning Approach
