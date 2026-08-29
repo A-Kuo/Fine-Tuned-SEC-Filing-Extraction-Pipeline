@@ -15,7 +15,7 @@
 
 ## The Problem: Why Untagged Prose Is Hard
 
-Many financial figures and disclosures in SEC filings are machine-tagged via iXBRL — those are handled deterministically by the [sec-edgar-extraction-pipeline](https://github.com/A-Kuo/sec-edgar-extraction-pipeline). But a significant portion of financially material information lives in **untagged narrative text** that requires language understanding:
+Many financial figures and disclosures in SEC filings are machine-tagged via iXBRL [that can be handled deterministically](https://github.com/A-Kuo/sec-edgar-extraction-pipeline). But a significant portion of financially material information lives in **untagged narrative text** that requires language understanding:
 
 **1. Structure inconsistency.** A 10-K filed by Apple in 2024 looks nothing like a 10-K filed by a regional bank in 2019. MD&A sections, footnotes, and non-GAAP reconciliations appear in different orders with varying formats.
 
@@ -355,7 +355,7 @@ make typecheck         # mypy
 
 | Repository | Role |
 |-----------|------|
-| [WIP Integration as part of sec pipeline](https://github.com/A-Kuo/sec-edgar-extraction-pipeline) | Upstream: EDGAR ingestion, iXBRL-tagged fact extraction, rate limiting, amendment chains. This repo consumes its filing documents and deterministic facts (`method='xbrl'`) |
+| [iXRBL Ingestion (Private) ](https://github.com/A-Kuo/sec-edgar-extraction-pipeline) | Upstream: EDGAR ingestion, iXBRL-tagged fact extraction, rate limiting, amendment chains. This repo consumes its filing documents and deterministic facts (`method='xbrl'`) |
 | [WIP Refactored MD&A Human Sentiment](https://github.com/A-Kuo/Transformer-Aspect-Based-Sentiment-Analysis) |
 | [WIP Tickers Agent](https://github.com/A-Kuo/Financial-Economic-Ticker-Analyzer-Agent) | Receives extracted ticker for market intelligence enrichment |
 | [WIP Agentic Framework](https://github.com/A-Kuo/Agentic-Visualization-Framework) | Receives structured output for dashboard generation |
