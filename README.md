@@ -9,7 +9,7 @@
 
 > *"SEC filings contain valuable financial data buried in narrative prose — MD&A sections, footnotes, non-GAAP reconciliations, and untagged tables — that no general-purpose parser can reliably handle. This pipeline extracts structured data from that untagged text."*
 
-> **Scope:** This repo handles **untagged-prose extraction only** — narrative sections that the SEC filer did not machine-tag with iXBRL. For iXBRL-tagged facts (deterministic ingestion, rate limiting, amendment chains, quality gates), see [sec-edgar-extraction-pipeline](https://github.com/A-Kuo/sec-edgar-extraction-pipeline). This repo consumes filing documents and tagged facts from that pipeline; it does not reimplement EDGAR ingestion. All facts emitted here carry `method='llm'` with a confidence score and model version. An `llm` fact never overwrites an `xbrl` fact for the same natural key.
+> **Scope:** This repo handles **untagged-prose extraction only** — narrative sections that the SEC filer did not machine-tag with iXBRL. This repo consumes filing documents and tagged facts from that pipeline; it does not reimplement EDGAR ingestion. All facts emitted here carry `method='llm'` with a confidence score and model version. An `llm` fact never overwrites an `xbrl` fact for the same natural key.
 
 ---
 
