@@ -17,17 +17,17 @@
 
 Many financial figures and disclosures in SEC filings are machine-tagged via iXBRL — those are handled deterministically by the [sec-edgar-extraction-pipeline](https://github.com/A-Kuo/sec-edgar-extraction-pipeline). But a significant portion of financially material information lives in **untagged narrative text** that requires language understanding:
 
-**1. No consistent structure.** A 10-K filed by Apple in 2024 looks nothing like a 10-K filed by a regional bank in 2019. MD&A sections, footnotes, and non-GAAP reconciliations appear in different orders with varying formats.
+**1. Structure inconsistency.** A 10-K filed by Apple in 2024 looks nothing like a 10-K filed by a regional bank in 2019. MD&A sections, footnotes, and non-GAAP reconciliations appear in different orders with varying formats.
 
-**2. Legalese obscures financial signal.** The Management Discussion & Analysis (MD&A) section is where companies discuss their actual financial performance. But it is written by lawyers and investor relations teams to minimize legal exposure, not to communicate clearly. "Revenue increased 12% year-over-year driven by growth in our services segment, partially offset by headwinds in our hardware category" encodes aspect-level sentiment that requires NLP understanding, not keyword matching.
+**2. Legalese obscures financial signal.** The Management Discussion & Analysis (MD&A) section is where companies discuss their actual financial performance, but it is written by lawyers and investor relations teams to minimize legal exposure, not to communicate clearly. "Revenue increased 12% year-over-year driven by growth in our services segment, partially offset by headwinds in our hardware category" encodes aspect-level sentiment that may require NLP understanding.
 
-**3. Numbers appear in multiple formats.** `$394,328 million`, `$394.3 billion`, `394328000000` — the same number, three representations. Tables sometimes report in thousands, sometimes in millions. Currency symbols may or may not be present. A general-purpose number extractor will get this wrong constantly.
+**3. Numbers appear in multiple formats.** `$394,328 million`, `$394.3 billion`, and `394328000000`  are three formats of the same number. Tables themselves can report in different denominations, and currency symbols may or may not be present. Thus a general purpose extraction is risky.
 
 **4. Untagged tables break naive parsers.** Not all financial tables are iXBRL-tagged. Text-rendered tables in plain-text filings and non-GAAP reconciliation tables often lack machine-readable markup entirely.
 
-**5. Non-GAAP metrics are never tagged.** Companies frequently report adjusted EBITDA, free cash flow, and other non-standard metrics only in prose. These require LLM extraction.
+**5. Non-GAAP metrics are never tagged.** Companies frequently report adjusted EBITDA, free cash flow, and other non-standard metrics only in prose. These require NLP extraction.
 
-For iXBRL-tagged facts — where the filer has already machine-labeled the number — deterministic extraction is both simpler and more reliable. That work belongs to the [sec-edgar-extraction-pipeline](https://github.com/A-Kuo/sec-edgar-extraction-pipeline). This repo picks up where tagging ends.
+For iXBRL-tagged facts — where the filer has already machine-labeled the number — deterministic extraction is both simpler and more reliable. [Downserted pipeline](https://github.com/A-Kuo/sec-edgar-extraction-pipeline)..
 
 ---
 
@@ -200,7 +200,7 @@ uvicorn serving.api:app --host 0.0.0.0 --port 8001
 
 ---
 
-## Integration with Downstream ABSA Analysis
+## WIP Integration with Downstream ABSA Analysis
 
 The SEC extraction pipeline is the entry point for the full financial intelligence stack. After extraction, the `ticker` and raw filing text feed into two separate downstream consumers:
 
@@ -310,10 +310,9 @@ make train
 ```bash
 make train-kaggle
 # Pushes scripts/kaggle_kernel/ to Kaggle, trains on a GPU-enabled kernel,
-# and logs to the same MLFlow experiment as local runs.
 ```
 
-Or use the Colab notebooks for GPU-accelerated training without local hardware:
+I have not yet set up Colab links.
 
 | Notebook | Purpose | Min GPU |
 |----------|---------|---------|
@@ -327,29 +326,6 @@ make dashboard      # Streamlit dashboard at localhost:8501
 make monitor        # CLI drift report
 make evaluate       # Accuracy metrics against ground truth
 make benchmark      # Latency/throughput/memory profile
-```
-
----
-
-## Full Pipeline Quickstart
-
-To run the complete three-stage pipeline (extraction → market intelligence → visualization):
-
-```bash
-# Clone all three core repos
-git clone https://github.com/A-Kuo/Fine-Tuned-SEC-Filing-Extraction-Pipeline.git findoc
-git clone https://github.com/A-Kuo/Financial-Economic-Ticker-Analyzer-Agent.git ticker-agent
-git clone https://github.com/A-Kuo/Agentic-Visualization-Framework.git viz
-
-# Start the full stack
-cd findoc
-docker compose -f docker-compose.pipeline.yml up -d
-
-# Run end-to-end
-make pipeline-extract    # Extract from SEC filings
-make pipeline-enrich     # Enrich with market data
-make pipeline-visualize  # Generate dashboard
-```
 
 ---
 
@@ -379,10 +355,10 @@ make typecheck         # mypy
 
 | Repository | Role |
 |-----------|------|
-| [sec-edgar-extraction-pipeline](https://github.com/A-Kuo/sec-edgar-extraction-pipeline) | Upstream: EDGAR ingestion, iXBRL-tagged fact extraction, rate limiting, amendment chains. This repo consumes its filing documents and deterministic facts (`method='xbrl'`) |
-| [Transformer-Aspect-Based-Sentiment-Analysis](https://github.com/A-Kuo/Transformer-Aspect-Based-Sentiment-Analysis) | Receives MD&A text for aspect sentiment analysis |
-| [Financial-Economic-Ticker-Analyzer-Agent](https://github.com/A-Kuo/Financial-Economic-Ticker-Analyzer-Agent) | Receives extracted ticker for market intelligence enrichment |
-| [Agentic-Visualization-Framework](https://github.com/A-Kuo/Agentic-Visualization-Framework) | Receives structured output for dashboard generation |
+| [WIP Integration as part of sec pipeline](https://github.com/A-Kuo/sec-edgar-extraction-pipeline) | Upstream: EDGAR ingestion, iXBRL-tagged fact extraction, rate limiting, amendment chains. This repo consumes its filing documents and deterministic facts (`method='xbrl'`) |
+| [WIP Refactored MD&A Human Sentiment](https://github.com/A-Kuo/Transformer-Aspect-Based-Sentiment-Analysis) |
+| [WIP Tickers Agent](https://github.com/A-Kuo/Financial-Economic-Ticker-Analyzer-Agent) | Receives extracted ticker for market intelligence enrichment |
+| [WIP Agentic Framework](https://github.com/A-Kuo/Agentic-Visualization-Framework) | Receives structured output for dashboard generation |
 
 ---
 
