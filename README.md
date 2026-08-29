@@ -375,4 +375,4 @@ make typecheck         # mypy
 
 ---
 
-*The data has always been public. Making it usable is the engineering. April 2026.*
+*Data is persistent. Engineering makes it useful.*
