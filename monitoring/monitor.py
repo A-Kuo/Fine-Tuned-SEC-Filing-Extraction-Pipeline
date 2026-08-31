@@ -61,8 +61,8 @@ class DriftReport:
             "baseline_value": round(self.baseline_value, 4),
             "threshold": self.threshold,
             "is_drifted": self.is_drifted,
-            "z_score": round(self.z_score, 3) if self.z_score else None,
-            "p_value": round(self.p_value, 4) if self.p_value else None,
+            "z_score": round(self.z_score, 3) if self.z_score is not None else None,
+            "p_value": round(self.p_value, 4) if self.p_value is not None else None,
             "sample_size": self.sample_size,
             "checked_at": self.checked_at or datetime.now(timezone.utc).isoformat(),
         }
