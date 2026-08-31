@@ -14,8 +14,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.chat_template import LLAMA31_CHAT_TEMPLATE
-from src.inference import EXTRACTION_INSTRUCTION, SYSTEM_PROMPT, ExtractionEngine
+from src.core.chat_template import LLAMA31_CHAT_TEMPLATE
+from src.extraction.inference import EXTRACTION_INSTRUCTION, SYSTEM_PROMPT, ExtractionEngine
 
 
 def _make_engine(chat_template):

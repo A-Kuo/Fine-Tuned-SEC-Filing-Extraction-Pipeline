@@ -9,7 +9,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.normalizer import (
+from src.extraction.normalizer import (
     filing_record_to_rows,
     metric_to_row,
     mdna_to_row,
@@ -19,7 +19,7 @@ from src.normalizer import (
     risk_factor_to_row,
     section_to_row,
 )
-from src.schemas import (
+from src.core.schemas import (
     FilingMetadata,
     FilingRecord,
     MdnaSummaryRecord,

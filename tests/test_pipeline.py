@@ -9,9 +9,9 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.inference import ExtractionRequest, ExtractionResponse
-from src.pipeline import build_filing_record, extract_llm_metrics, extraction_result_to_metrics
-from src.postprocessing import ExtractionResult
+from src.extraction.inference import ExtractionRequest, ExtractionResponse
+from src.extraction.pipeline import build_filing_record, extract_llm_metrics, extraction_result_to_metrics
+from src.extraction.postprocessing import ExtractionResult
 
 SAMPLE_FILING = """
 Item 1A. Risk Factors

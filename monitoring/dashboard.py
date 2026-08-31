@@ -51,7 +51,7 @@ def generate_demo_data():
 def _load_dashboard_data_cached(days: int):
     """Load time series and logs from PostgreSQL via DatabaseManager."""
     try:
-        from src.database import DatabaseManager
+        from src.storage.database import DatabaseManager
 
         db = DatabaseManager.from_config()
         accuracy_history = db.get_daily_extraction_counts(days=days)
@@ -90,7 +90,7 @@ def load_dashboard_data(days: int = 30):
 @st.cache_data(ttl=300)
 def _recent_extractions_cached():
     try:
-        from src.database import DatabaseManager
+        from src.storage.database import DatabaseManager
 
         db = DatabaseManager.from_config()
         rows = db.get_recent_extractions_dashboard(20)

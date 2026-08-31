@@ -36,7 +36,7 @@ from typing import Optional
 from loguru import logger
 
 from src.config import load_config
-from src.postprocessing import ExtractionResult
+from src.extraction.postprocessing import ExtractionResult
 
 
 class RedisCache:

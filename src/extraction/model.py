@@ -38,7 +38,7 @@ from transformers import (
     GenerationConfig,
 )
 
-from src.chat_template import ensure_chat_template, generation_eos_token_ids
+from src.core.chat_template import ensure_chat_template, generation_eos_token_ids
 from src.config import load_config
 
 

@@ -12,8 +12,8 @@ from __future__ import annotations
 
 from loguru import logger
 
-from src.normalizer import filing_record_to_rows, resolve_metric_precedence
-from src.schemas import FilingRecord, MetricRecord
+from src.extraction.normalizer import filing_record_to_rows, resolve_metric_precedence
+from src.core.schemas import FilingRecord, MetricRecord
 
 
 class NormalizedStorage:

@@ -62,7 +62,7 @@ from trl import SFTConfig, SFTTrainer
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from src.config import load_config, get_project_root
-from src.chat_template import ensure_chat_template
+from src.core.chat_template import ensure_chat_template
 from training.callbacks import MetricsCallback, EarlyStoppingOnLoss
 from training.data_collator import FinancialDataCollator
 

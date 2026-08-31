@@ -12,8 +12,8 @@ from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.database import RedisCache, PostgresStorage, DatabaseManager
-from src.postprocessing import ExtractionResult
+from src.storage.database import RedisCache, PostgresStorage, DatabaseManager
+from src.extraction.postprocessing import ExtractionResult
 
 
 # ─── Financial Value Parsing ─────────────────────────────────────────────────

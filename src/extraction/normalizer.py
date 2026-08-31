@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import re
 
-from src.schemas import (
+from src.core.schemas import (
     FilingRecord,
     MdnaSummaryRecord,
     MetricRecord,

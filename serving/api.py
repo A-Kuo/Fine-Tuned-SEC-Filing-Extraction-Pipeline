@@ -57,16 +57,16 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from src.ab_router import assign_for_request
 from src.circuit_breaker import CircuitBreaker, check_http_health
 from src.config import load_config
-from src.database import DatabaseManager
-from src.inference import (
+from src.storage.database import DatabaseManager
+from src.extraction.inference import (
     ExtractionEngine,
     ExtractionRequest,
     ExtractionResponse,
     EXTRACTION_INSTRUCTION,
     SYSTEM_PROMPT,
 )
-from src.logging_config import configure_logging, set_request_id
-from src.postprocessing import parse_extraction, validate_extraction
+from src.core.logging_config import configure_logging, set_request_id
+from src.extraction.postprocessing import parse_extraction, validate_extraction
 from serving.security import assert_api_key_if_configured
 
 # ─── Prometheus metrics ─────────────────────────────────────────────────────

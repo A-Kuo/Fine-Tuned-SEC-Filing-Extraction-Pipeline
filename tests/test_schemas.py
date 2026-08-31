@@ -8,7 +8,7 @@ from pydantic import ValidationError
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.schemas import (
+from src.core.schemas import (
     FilingMetadata,
     FilingRecord,
     MdnaSummaryRecord,

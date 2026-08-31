@@ -35,6 +35,7 @@ jsonschema>=4.20.0
 psycopg2-binary>=2.9.9
 redis>=5.0.0
 sqlalchemy>=2.0.0
+
 # Supabase integration (Remove this before next commit)
 # https://vjsztpxovgdarztyyouv.supabase.co
 

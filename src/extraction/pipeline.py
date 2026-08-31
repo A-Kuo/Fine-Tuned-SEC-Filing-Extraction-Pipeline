@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from src.section_parser import extract_sections
-from src.schemas import (
+from src.extraction.section_parser import extract_sections
+from src.core.schemas import (
     FilingMetadata,
     FilingRecord,
     MdnaSummaryRecord,
@@ -11,11 +11,11 @@ from src.schemas import (
     RiskFactorRecord,
     SectionRecord,
 )
-from src.normalizer import normalize_metric, resolve_metric_precedence
+from src.extraction.normalizer import normalize_metric, resolve_metric_precedence
 
 if TYPE_CHECKING:
-    from src.inference import ExtractionEngine
-    from src.postprocessing import ExtractionResult
+    from src.extraction.inference import ExtractionEngine
+    from src.extraction.postprocessing import ExtractionResult
 
 
 # Flat ExtractionResult financial fields -> normalized metric names.
@@ -69,7 +69,7 @@ def extract_llm_metrics(
 ) -> list[MetricRecord]:
     """Run architecture A's ExtractionEngine over section text and adapt the
     flat ExtractionResult into normalized MetricRecords (method='llm')."""
-    from src.inference import ExtractionRequest
+    from src.extraction.inference import ExtractionRequest
 
     response = engine.extract(ExtractionRequest(text=section_text, filing_id=filing_id))
     if response.result is None:

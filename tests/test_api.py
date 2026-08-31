@@ -122,8 +122,8 @@ class TestPromptBuilding:
 class TestResponseConversion:
     def test_to_response_model_success(self):
         from serving.api import _to_response_model
-        from src.inference import ExtractionResponse
-        from src.postprocessing import ExtractionResult
+        from src.extraction.inference import ExtractionResponse
+        from src.extraction.postprocessing import ExtractionResult
 
         result = ExtractionResult(
             filing_id="123",
@@ -146,7 +146,7 @@ class TestResponseConversion:
 
     def test_to_response_model_error(self):
         from serving.api import _to_response_model
-        from src.inference import ExtractionResponse
+        from src.extraction.inference import ExtractionResponse
 
         response = ExtractionResponse(
             result=None,

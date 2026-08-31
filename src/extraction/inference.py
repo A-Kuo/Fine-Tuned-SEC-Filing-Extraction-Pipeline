@@ -25,9 +25,9 @@ from typing import Optional, TYPE_CHECKING
 from loguru import logger
 
 if TYPE_CHECKING:
-    from src.model import FinancialLLM
+    from src.extraction.model import FinancialLLM
 
-from src.postprocessing import (
+from src.extraction.postprocessing import (
     parse_extraction,
     validate_extraction,
     ExtractionResult,
@@ -93,7 +93,7 @@ class ExtractionEngine:
         """Lazy-load model on first use."""
         if not self._initialized:
             logger.info("Initializing extraction engine...")
-            from src.model import FinancialLLM
+            from src.extraction.model import FinancialLLM
             self.model = FinancialLLM.from_config()
             self._initialized = True
             logger.info("Extraction engine ready")

@@ -13,7 +13,7 @@ from jinja2 import Template
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.chat_template import (
+from src.core.chat_template import (
     EOT_TOKEN,
     LLAMA31_CHAT_TEMPLATE,
     ensure_chat_template,

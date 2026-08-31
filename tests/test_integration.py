@@ -15,8 +15,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.postprocessing import parse_extraction, validate_extraction, ExtractionResult
-from src.inference import ExtractionEngine, ExtractionRequest, ExtractionResponse
+from src.extraction.postprocessing import parse_extraction, validate_extraction, ExtractionResult
+from src.extraction.inference import ExtractionEngine, ExtractionRequest, ExtractionResponse
 from evaluation.evaluate import evaluate_single, fuzzy_financial_match
 from monitoring.monitor import generate_full_report
 

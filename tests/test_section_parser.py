@@ -7,7 +7,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.section_parser import extract_sections
+from src.extraction.section_parser import extract_sections
 
 
 SAMPLE_FILING = """

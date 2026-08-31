@@ -12,8 +12,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.normalized_storage import NormalizedStorage
-from src.schemas import (
+from src.storage.normalized_storage import NormalizedStorage
+from src.core.schemas import (
     FilingMetadata,
     FilingRecord,
     MdnaSummaryRecord,
