@@ -1,0 +1,14 @@
+version: "3.9"
+
+services:
+  fin-doc-api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: fin-doc-api
+    env_file:
+      - .env.docker.example
+    ports:
+      - "8000:8000"
+    command: python -m serving.api
+    restart: unless-stopped
