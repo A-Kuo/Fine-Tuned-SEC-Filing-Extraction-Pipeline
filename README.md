@@ -2,7 +2,7 @@
 
 **Untagged-prose extraction from SEC filings using QLoRA fine-tuned Llama 3.1 8B**
 
-[![Python](https://img.shields.io/badge/Python-3.12%2B-2E83E8?logo=python&logoColor=2E83E8&style=plastic)](https://www.python.org/downloads/release/python-3120/)
+[![Python](https://img.shields.io/badge/Python-3.12%2B-blue?logo=python&logoColor=blue&style=plastic)](https://www.python.org/downloads/release/python-3120/)
 [![MLOps](https://img.shields.io/badge/MLOps-Ubuntu-orange?logo=ubuntu&style=plastic)](https://ubuntu.com/engage/mlops-guide)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-18.6-608CC4?&logoColor=608CC4&logo=postgresql&style=plastic)](https://www.postgresql.org/docs/18/index.html)
 [![Hugging Face](https://img.shields.io/badge/Hugging%20Face-Transformers-yellow?logo=huggingface&style=plastic)](https://huggingface.co/transformers)
