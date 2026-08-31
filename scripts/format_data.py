@@ -23,7 +23,7 @@ from rich.console import Console
 from tqdm import tqdm
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from src.config import load_config, get_project_root
+from src.core.config import load_config, get_project_root
 
 console = Console()
 

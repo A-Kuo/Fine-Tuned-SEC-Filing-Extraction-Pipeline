@@ -27,7 +27,7 @@ import httpx
 from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from src.config import get_project_root, load_config
+from src.core.config import get_project_root, load_config
 
 
 SEC_DATA = "https://data.sec.gov"

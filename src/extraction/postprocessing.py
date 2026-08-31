@@ -18,7 +18,7 @@ from typing import Any, Optional
 
 from loguru import logger
 
-from src.config import load_config
+from src.core.config import load_config
 
 
 @dataclass

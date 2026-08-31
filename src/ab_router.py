@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 
-from src.config import load_config
+from src.core.config import load_config
 
 
 @dataclass

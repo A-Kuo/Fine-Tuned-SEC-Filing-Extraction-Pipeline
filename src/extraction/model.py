@@ -39,7 +39,7 @@ from transformers import (
 )
 
 from src.core.chat_template import ensure_chat_template, generation_eos_token_ids
-from src.config import load_config
+from src.core.config import load_config
 
 
 def _resolve_adapter_path(config: dict, adapter_path: str) -> tuple[str, str]:

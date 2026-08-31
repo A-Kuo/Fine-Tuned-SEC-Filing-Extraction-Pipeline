@@ -31,7 +31,7 @@ from pathlib import Path
 from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from src.config import load_config
+from src.core.config import load_config
 
 KERNEL_DIR = Path(__file__).parent / "kaggle_kernel"
 

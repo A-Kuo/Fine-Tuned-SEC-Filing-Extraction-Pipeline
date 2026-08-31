@@ -56,7 +56,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.ab_router import assign_for_request
 from src.circuit_breaker import CircuitBreaker, check_http_health
-from src.config import load_config
+from src.core.config import load_config
 from src.storage.database import DatabaseManager
 from src.extraction.inference import (
     ExtractionEngine,

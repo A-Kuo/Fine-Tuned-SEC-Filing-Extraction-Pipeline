@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import HTTPException, Request
 
-from src.config import load_config
+from src.core.config import load_config
 
 
 def assert_api_key_if_configured(request: Request, config: dict | None = None) -> None:

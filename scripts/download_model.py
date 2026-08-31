@@ -19,7 +19,7 @@ from rich.progress import Progress
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from src.config import load_config
+from src.core.config import load_config
 
 console = Console()
 

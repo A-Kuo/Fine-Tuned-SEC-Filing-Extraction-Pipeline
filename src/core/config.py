@@ -11,7 +11,7 @@ from typing import Any
 import yaml
 
 
-_PROJECT_ROOT = Path(__file__).parent.parent
+_PROJECT_ROOT = Path(__file__).parent.parent.parent
 _CONFIG_PATH = _PROJECT_ROOT / "config.yaml"
 _config_cache: dict | None = None
 
