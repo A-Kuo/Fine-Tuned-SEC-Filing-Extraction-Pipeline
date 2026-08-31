@@ -15,9 +15,7 @@ This project sits upstream within EDGAR/iXBRL ingestion, handling extraction of 
 
 ## Table of Contents
 
-- [Overview](#overview)
-- [The Problem](#the-problem)
-- [What This Repository Does](#what-this-repository-does)
+- [Overview](#project-overview)
 - [Architecture](#architecture)
 - [Model and Fine-Tuning Approach](#model-and-fine-tuning-approach)
 - [Extraction Output](#extraction-output)
@@ -34,21 +32,41 @@ This project sits upstream within EDGAR/iXBRL ingestion, handling extraction of 
 
 ---
 
-## Overview
+## Project Overview
+
+Financial disclosures in SEC filings are a messy collection. Even when companies use iXBRL tags for their main financial statements, a ton of crucial context and secondary metrics get buried in the narrative sections. This project tackles that problem by using an LLM-based extraction pipeline for untagged SEC prose, filling the gaps where traditional, deterministic parsers fall short.The biggest hurdle with SEC data is that it is incredibly inconsistent. 
+
+Different industries format the same concepts entirely unique ways, and critical insights about growth or margin pressures are often hidden inside dense legal jargon. On top of that, numbers are expressed haphazardly—one filing might say $394,328 million while another says $394.3 billion—and important data like non-GAAP reconciliations frequently live in plain-text tables with zero digital markup. Because metrics like adjusted EBITDA or free cash flow are purposely left untagged, they require a smart, semantic tool to pull them out accurately.
+
+This project provides everything you need to extract those hidden, unstructured records and turn them into clean data. It includes the core LLM extraction pipeline, code and notebooks for fine-tuning the model, and post-processing logic to validate the outputs. It also comes fully equipped with serving infrastructure for both single-document and batch processing, along with utilities to monitor performance and run comprehensive tests.
 
 This repository is a model-serving and evaluation pipeline for extracting structured financial data from **untagged SEC filing text**. The core idea is simple: use deterministic systems where filings are already machine-tagged, and reserve an LLM-based extraction pipeline for the prose and tables that remain ambiguous, irregular, or entirely untagged.
 
 The pipeline is built around a fine-tuned Llama 3.1 8B model with QLoRA adapters, a post-processing layer that recovers malformed JSON, a validation layer that checks required fields, and a serving layer for online and batch inference. The repo also includes training, notebook-based evaluation, monitoring hooks, and infrastructure for caching and persistence.
 
----
+### Worktree
 
-## The Problem
+| Path | Purpose |
+|------|---------|
+| `src/` | Core extraction logic, including config loading, prompt construction, model wrappers, inference, normalization, post-processing, validation, routing, and persistence helpers |
+| `serving/` | Runtime interfaces such as the FastAPI app, batch inference entrypoints, inference server wrappers, and request security helpers |
+| `training/` | QLoRA training pipeline components, including callbacks, collators, and training entrypoints |
+| `evaluation/` | Accuracy and benchmark utilities for extraction quality, latency, throughput, and reference-set evaluation |
+| `monitoring/` | Drift checks, alerting, and dashboard-oriented monitoring workflows |
+| `scripts/` | Operational utilities such as dataset generation, model download, Kaggle job submission and retrieval, EDGAR helpers, and SQL initialization scripts |
+| `notebooks/` | GPU-oriented notebooks for fine-tuning, inference evaluation, latency profiling, and experimental validation |
+| `data/` | Small local reference artifacts, including sample filing text and expected extraction outputs used for smoke tests and demos |
+| `tests/` | Automated test coverage for parsing, validation, API behavior, persistence, routing, monitoring, and mocked end-to-end flows |
+| `docs/` | Project documentation such as API contracts and architecture boundaries with upstream and downstream systems |
+| `observability/` | Grafana, Prometheus, Loki, Promtail, and alerting configuration for operational visibility |
+| `helm/` and `k8s/` | Deployment manifests and chart assets for containerized or cluster-based environments |
+| `supabase/` | Early-stage Supabase integration area for managed persistence and future migration-based database workflows |
 
-Financial disclosures in SEC filings are a messy goldmine. Even when companies use iXBRL tags for their main financial statements, a ton of crucial context and secondary metrics get buried in the narrative sections. This project tackles that problem by using an LLM-based extraction pipeline for untagged SEC prose, filling the gaps where traditional, deterministic parsers fall short.The biggest hurdle with SEC data is that it is incredibly inconsistent. 
+A few directories are especially important for new readers:
 
-Different industries format the same concepts entirely unique ways, and critical insights about growth or margin pressures are often hidden inside dense legal jargon. On top of that, numbers are expressed haphazardly—one filing might say $394,328 million while another says $394.3 billion—and important data like non-GAAP reconciliations frequently live in plain-text tables with zero digital markup. Because metrics like adjusted EBITDA or free cash flow are purposely left untagged, they require a smart, semantic tool to pull them out accurately.
-
-This project provides everything you need to extract those hidden, unstructured records and turn them into clean data. It includes the core LLM extraction pipeline, code and notebooks for fine-tuning the model, and post-processing logic to validate the outputs. It also comes fully equipped with serving infrastructure for both single-document and batch processing, along with utilities to monitor performance and run comprehensive tests.
+- Start in `src/` to understand the extraction pipeline itself.
+- Use `notebooks/` if you want the fastest path to inspect training and inference behavior.
+- Check `tests/` and `evaluation/` for the strongest evidence of correctness and measurement.
 
 ---
 
