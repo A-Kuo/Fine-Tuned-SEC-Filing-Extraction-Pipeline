@@ -65,3 +65,6 @@ secrets/
 .DS_Store
 Thumbs.db
 research/
+
+# Repomix
+repomix-output.xml
