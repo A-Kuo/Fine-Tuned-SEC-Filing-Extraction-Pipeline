@@ -2,10 +2,11 @@
 
 **Untagged-prose extraction from SEC filings using QLoRA fine-tuned Llama 3.1 8B**
 
-[![CI](https://img.shields.io/badge/CI-passing-brightgreen)](https://github.com/A-Kuo/Fine-Tuned-SEC-Filing-Extraction-Pipeline/actions)
-[![Python](https://img.shields.io/badge/python-3.10%20|%203.11%20|%203.12-blue)](https://www.python.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Project Type](https://img.shields.io/badge/MLOps-Engineering%20-red.svg)]()
+[![Python](https://img.shields.io/badge/Python-3.12%2B-blue?logo=python&logoColor=blue&style=plastic)](https://www.python.org/downloads/release/python-3120/)
+[![MLOps](https://img.shields.io/badge/MLOps-Ubuntu-orange?logo=ubuntu&style=plastic)](https://ubuntu.com/engage/mlops-guide)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-18.6-608CC4?&logoColor=608CC4&logo=postgresql&style=plastic)](https://www.postgresql.org/docs/18/index.html)
+[![Hugging Face](https://img.shields.io/badge/Hugging%20Face-Transformers-yellow?logo=huggingface&style=plastic)](https://huggingface.co/transformers)
+[![License: MIT](https://img.shields.io/badge/License-MIT-red?style=plastic&logo=mit)](https://en.wikipedia.org/wiki/MIT_License)
 <!-- [![Status](https://img.shields.io/badge/Status-Production--Grade-brightgreen.svg)]() -->
 
 "SEC filings contain valuable financial data buried in narrative prose — MD&A sections, footnotes, non-GAAP reconciliations, and untagged tables — that no general-purpose parser can reliably handle. This pipeline extracts structured data from that untagged text."
@@ -486,7 +487,7 @@ This repository has several important limitations.
 For a fuller discussion of risks, assumptions, and intended use, keep `MODEL_CARD.md` aligned with this section.
 
 ---
-
+<!--
 ## Related Repositories
 
 | Repository | Role |
@@ -497,7 +498,7 @@ For a fuller discussion of risks, assumptions, and intended use, keep `MODEL_CAR
 | [Agentic Visualization Framework](https://github.com/A-Kuo/Agentic-Visualization-Framework) | Planned downstream visualization and dashboard generation |
 
 ---
-
+-->
 ## Citation
 
 ```bibtex
