@@ -487,7 +487,7 @@ This repository has several important limitations.
 For a fuller discussion of risks, assumptions, and intended use, keep `MODEL_CARD.md` aligned with this section.
 
 ---
-
+<!--
 ## Related Repositories
 
 | Repository | Role |
@@ -498,7 +498,7 @@ For a fuller discussion of risks, assumptions, and intended use, keep `MODEL_CAR
 | [Agentic Visualization Framework](https://github.com/A-Kuo/Agentic-Visualization-Framework) | Planned downstream visualization and dashboard generation |
 
 ---
-
+-->
 ## Citation
 
 ```bibtex
