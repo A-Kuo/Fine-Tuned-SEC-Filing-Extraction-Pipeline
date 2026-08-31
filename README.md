@@ -56,47 +56,69 @@ This project provides everything you need to extract those hidden, unstructured 
 
 The pipeline is organized as a staged extraction system:
 
-```text
-SEC Filing Text
-      │
-      ▼
-┌──────────────────────┐
-│ Prompt Builder       │
-│ instruction + schema │
-└──────────┬───────────┘
-           ▼
-┌──────────────────────┐
-│ Llama 3.1 8B         │
-│ NF4 4-bit + LoRA     │
-└──────────┬───────────┘
-           ▼
-┌──────────────────────┐
-│ JSON Recovery Layer  │
-│ 5-strategy cascade   │
-└──────────┬───────────┘
-           ▼
-┌──────────────────────┐
-│ Validation Layer     │
-│ required/optional    │
-│ field checks         │
-└──────────┬───────────┘
-           ▼
-┌──────────────────────┐
-│ Cache + Persistence  │
-│ Redis + PostgreSQL   │
-└──────────┬───────────┘
-           ▼
-┌──────────────────────┐
-│ API / Batch Serving  │
-│ FastAPI / vLLM       │
-└──────────┬───────────┘
-           ▼
-┌──────────────────────┐
-│ Monitoring           │
-│ drift / latency      │
-│ evaluation dashboard │
-└──────────────────────┘
+```mermaid
+flowchart LR
+    FILING[SEC filing text]
+
+    subgraph APP["Application layer"]
+        PROMPT[Prompt builder<br/>instruction + schema formatting]
+        API[FastAPI interface<br/>extract · batch · health · metrics · stats]
+        BATCH[Batch inference runner<br/>serving/batch_inference.py]
+    end
+
+    subgraph MODEL["Model inference layer"]
+        LLAMA[Llama 3.1 8B<br/>NF4 4-bit + LoRA adapters]
+        VLLM[vLLM backend<br/>continuous batching]
+    end
+
+    subgraph POST["Post-processing layer"]
+        RECOVERY[JSON recovery<br/>5-strategy cascade]
+        VALIDATE[Validation layer<br/>required / optional field checks]
+    end
+
+    subgraph STORAGE["Persistence and cache layer"]
+        REDIS[(Redis cache)]
+        POSTGRES[(PostgreSQL / persistent store)]
+    end
+
+    subgraph OBS["Evaluation and monitoring layer"]
+        EVAL[Evaluation workflows<br/>field accuracy + benchmark runs]
+        DASH[Monitoring dashboard<br/>drift · latency · profiling]
+    end
+
+    subgraph TRAIN["Training and experiment layer"]
+        NOTEBOOKS[Notebook workflows<br/>fine-tuning + inference eval]
+        QLORA[QLoRA training pipeline<br/>PEFT / Transformers / PyTorch]
+        MLFLOW[Experiment tracking<br/>MLflow / DagsHub]
+    end
+
+    FILING --> PROMPT
+    PROMPT --> API
+    PROMPT --> BATCH
+
+    API --> LLAMA
+    BATCH --> LLAMA
+    API -. high-throughput path .-> VLLM
+    BATCH -. high-throughput path .-> VLLM
+
+    LLAMA --> RECOVERY
+    VLLM --> RECOVERY
+    RECOVERY --> VALIDATE
+
+    VALIDATE --> REDIS
+    VALIDATE --> POSTGRES
+
+    VALIDATE --> EVAL
+    REDIS --> DASH
+    POSTGRES --> DASH
+    EVAL --> DASH
+
+    NOTEBOOKS --> QLORA
+    QLORA --> LLAMA
+    QLORA --> MLFLOW
+    NOTEBOOKS --> EVAL
 ```
+
 
 ### Core components
 
