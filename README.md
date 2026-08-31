@@ -9,100 +9,155 @@
 
 "SEC filings contain valuable financial data buried in narrative prose — MD&A sections, footnotes, non-GAAP reconciliations, and untagged tables — that no general-purpose parser can reliably handle. This pipeline extracts structured data from that untagged text."
 
-This repo handles untagged prose extraction, or narrative sections that the SEC filer did not machine-tag with iXBRL. This repo consumes filing documents and tagged facts from that pipeline; it does not reimplement EDGAR ingestion. All facts emitted here carry `method='llm'` with a confidence score and model version. An `llm` fact never overwrites an `xbrl` fact for the same natural key.
+This project sits upstream within EDGAR/iXBRL ingestion, handling extraction of high-volume facts fro untagged filing text while preserving confidence, provenance, and model versioning.
 
 ---
 
-## The Problem: Why Untagged Prose Is Hard
+## Table of Contents
 
-Many financial figures and disclosures in SEC filings are machine-tagged via iXBRL [that can be handled deterministically](https://github.com/A-Kuo/sec-edgar-extraction-pipeline). But a significant portion of financially material information lives in **untagged narrative text** that requires language understanding:
-
-**1. Structure inconsistency.** A 10-K filed by Apple in 2024 looks nothing like a 10-K filed by a regional bank in 2019. MD&A sections, footnotes, and non-GAAP reconciliations appear in different orders with varying formats.
-
-**2. Legalese obscures financial signal.** The Management Discussion & Analysis (MD&A) section is where companies discuss their actual financial performance, but it is written by lawyers and investor relations teams to minimize legal exposure, not to communicate clearly. "Revenue increased 12% year-over-year driven by growth in our services segment, partially offset by headwinds in our hardware category" encodes aspect-level sentiment that may require NLP understanding.
-
-**3. Numbers appear in multiple formats.** `$394,328 million`, `$394.3 billion`, and `394328000000`  are three formats of the same number. Tables themselves can report in different denominations, and currency symbols may or may not be present. Thus a general purpose extraction is risky.
-
-**4. Untagged tables break naive parsers.** Not all financial tables are iXBRL-tagged. Text-rendered tables in plain-text filings and non-GAAP reconciliation tables often lack machine-readable markup entirely.
-
-**5. Non-GAAP metrics are never tagged.** Companies frequently report adjusted EBITDA, free cash flow, and other non-standard metrics only in prose. These require NLP extraction.
-
-For iXBRL-tagged facts — where the filer has already machine-labeled the number — deterministic extraction is both simpler and more reliable. [Downserted pipeline](https://github.com/A-Kuo/sec-edgar-extraction-pipeline)..
-
----
-
-## Performance
-
-| Metric | Value | Comparison |
-|--------|-------|-----------|
-| Extraction Accuracy | 94% (fully correct JSON outputs)* | — |
-| Field-Level Accuracy | 92–99% per field* | — |
-| Inference Latency (p50) | ~320 ms/doc | — |
-| Throughput | ~60 docs/min | — |
-| Memory Footprint | 7.2 GB (NF4 4-bit) | vs. 32 GB FP32 — 77% reduction |
-| Trainable Parameters | ~200M / 8B total | 2.5% of model |
-| Cost per Document | ~$0.003 (self-hosted) | vs. ~$0.50 via GPT-4 API — 167× reduction |
-
-*\*Measured on a synthetic test set generated from templates. Real-world accuracy on authentic EDGAR filings is unverified. See [MODEL_CARD.md](MODEL_CARD.md) for full limitations.*
-
-See drift-monitoring dashboard for insight:
-
-https://warehouseduckdb-driftmonitordash-sec-finetunedpipeline.streamlit.app/
+- [Overview](#overview)
+- [The Problem](#the-problem)
+- [What This Repository Does](#what-this-repository-does)
+- [Architecture](#architecture)
+- [Model and Fine-Tuning Approach](#model-and-fine-tuning-approach)
+- [Extraction Output](#extraction-output)
+- [Evidence and Benchmarks](#evidence-and-benchmarks)
+- [Quickstart](#quickstart)
+- [How to Run and Inspect the Work](#how-to-run-and-inspect-the-work)
+- [Training and Notebooks](#training-and-notebooks)
+- [Testing](#testing)
+- [Monitoring](#monitoring)
+- [Planned Integrations](#planned-integrations)
+- [Limitations](#limitations)
+- [Related Repositories](#related-repositories)
+- [Citation](#citation)
 
 ---
 
-## The Fine-Tuning Approach
+## Overview
 
-### Base Model: Llama 3.1 8B
+This repository is a model-serving and evaluation pipeline for extracting structured financial data from **untagged SEC filing text**. The core idea is simple: use deterministic systems where filings are already machine-tagged, and reserve an LLM-based extraction pipeline for the prose and tables that remain ambiguous, irregular, or entirely untagged.
 
-Llama 3.1 8B was selected for its balance of capability and deployability. At 8 billion parameters, it is large enough to follow complex extraction instructions reliably, small enough to run on a single consumer GPU (16 GB VRAM) via 4-bit quantization.
+The pipeline is built around a fine-tuned Llama 3.1 8B model with QLoRA adapters, a post-processing layer that recovers malformed JSON, a validation layer that checks required fields, and a serving layer for online and batch inference. The repo also includes training, notebook-based evaluation, monitoring hooks, and infrastructure for caching and persistence.
 
-### QLoRA: Parameter-Efficient Fine-Tuning
+---
 
-QLoRA (Quantized Low-Rank Adaptation) allows fine-tuning a large language model without modifying — or even loading in full precision — the base model weights:
+## The Problem
 
+Financial disclosures in SEC filings are a messy goldmine. Even when companies use iXBRL tags for their main financial statements, a ton of crucial context and secondary metrics get buried in the narrative sections. This project tackles that problem by using an LLM-based extraction pipeline for untagged SEC prose, filling the gaps where traditional, deterministic parsers fall short.The biggest hurdle with SEC data is that it is incredibly inconsistent. 
+
+Different industries format the same concepts entirely unique ways, and critical insights about growth or margin pressures are often hidden inside dense legal jargon. On top of that, numbers are expressed haphazardly—one filing might say $394,328 million while another says $394.3 billion—and important data like non-GAAP reconciliations frequently live in plain-text tables with zero digital markup. Because metrics like adjusted EBITDA or free cash flow are purposely left untagged, they require a smart, semantic tool to pull them out accurately.
+
+This project provides everything you need to extract those hidden, unstructured records and turn them into clean data. It includes the core LLM extraction pipeline, code and notebooks for fine-tuning the model, and post-processing logic to validate the outputs. It also comes fully equipped with serving infrastructure for both single-document and batch processing, along with utilities to monitor performance and run comprehensive tests.
+
+---
+
+## Architecture
+
+The pipeline is organized as a staged extraction system:
+
+```text
+SEC Filing Text
+      │
+      ▼
+┌──────────────────────┐
+│ Prompt Builder       │
+│ instruction + schema │
+└──────────┬───────────┘
+           ▼
+┌──────────────────────┐
+│ Llama 3.1 8B         │
+│ NF4 4-bit + LoRA     │
+└──────────┬───────────┘
+           ▼
+┌──────────────────────┐
+│ JSON Recovery Layer  │
+│ 5-strategy cascade   │
+└──────────┬───────────┘
+           ▼
+┌──────────────────────┐
+│ Validation Layer     │
+│ required/optional    │
+│ field checks         │
+└──────────┬───────────┘
+           ▼
+┌──────────────────────┐
+│ Cache + Persistence  │
+│ Redis + PostgreSQL   │
+└──────────┬───────────┘
+           ▼
+┌──────────────────────┐
+│ API / Batch Serving  │
+│ FastAPI / vLLM       │
+└──────────┬───────────┘
+           ▼
+┌──────────────────────┐
+│ Monitoring           │
+│ drift / latency      │
+│ evaluation dashboard │
+└──────────────────────┘
 ```
-Base Model Weights (Frozen)
-        │
-        │  NF4 4-bit quantization
-        │  Reduces: 32 GB → 7.2 GB
-        │
-        ▼
-┌───────────────────┐
-│  Llama 3.1 8B    │  ← Read-only during training
-│  (4-bit, frozen) │
-└────────┬──────────┘
-         │
-         │  LoRA adapters injected at:
-         │  q_proj, k_proj, v_proj, o_proj
-         │  gate_proj, up_proj, down_proj
-         │
-         ▼
-┌───────────────────┐
-│  LoRA Adapters   │  ← Only these are trained
-│  rank=16, α=32   │  ~200M trainable parameters
-│  (~500 MB saved) │
-└───────────────────┘
-```
 
-The key insight is that the model's pre-trained knowledge about language and document structure is already sufficient — what it needs is domain-specific instruction about *how SEC filings present financial information*. LoRA injects that adaptation without touching the base weights.
+### Core components
 
-**Training configuration:**
+| Component | Responsibility |
+|----------|----------------|
+| Prompt builder | Formats filing text into extraction instructions for the model |
+| Fine-tuned model | Produces candidate structured output from narrative filing text |
+| JSON recovery layer | Repairs malformed or partially formatted model responses |
+| Validator | Enforces schema expectations and required fields |
+| Cache and persistence | Supports serving efficiency and auditability |
+| API layer | Exposes extraction endpoints and operational endpoints |
+| Monitoring layer | Tracks latency, throughput, drift, and evaluation metrics |
 
-| Parameter | Value | Rationale |
-|-----------|-------|-----------|
-| LoRA rank | 16 | Sufficient for domain-specific extraction |
-| LoRA alpha | 32 | 2× rank — standard scaling |
-| Target modules | q/k/v/o/gate/up/down | All linear projections |
-| Effective batch size | 32 (8 × 4 grad accum) | — |
-| Learning rate | 5e-4 with cosine decay | Standard for LoRA |
-| Quantization | NF4 4-bit + double quant | 7.2 GB vs 32 GB FP32 |
+### Serving modes
+
+There are two intended serving paths:
+
+- **Standard serving** for simpler local runs and development.
+- **vLLM-backed serving** for higher-throughput inference with better batching behavior.
 
 ---
 
-## What the Pipeline Extracts
+## Model and Fine-Tuning Approach
 
-From each SEC filing, the pipeline produces a structured JSON record containing:
+The base model is **Llama 3.1 8B**, selected as a middle ground between capability and deployability. It is large enough to follow extraction instructions on complex filing text, but still small enough to run on a single 16 GB class GPU with quantization.
+
+### Why QLoRA
+
+QLoRA allows domain adaptation without retraining or storing full-precision base weights. The approach freezes the base model, quantizes it to NF4 4-bit, and trains only low-rank adapter layers.
+
+```text
+Base model (frozen)
+      │
+      ├── NF4 4-bit quantization
+      │
+      ▼
+LoRA adapters inserted into linear projections
+      │
+      ▼
+Domain-adapted extraction model
+```
+
+### Training configuration
+
+| Parameter | Value |
+|----------|-------|
+| Base model | Llama 3.1 8B |
+| Quantization | NF4 4-bit + double quant |
+| LoRA rank | 16 |
+| LoRA alpha | 32 |
+| Target modules | q / k / v / o / gate / up / down |
+| Effective batch size | 32 |
+| Learning rate | 5e-4 with cosine decay |
+
+The goal is not to teach general financial language from scratch. The goal is to adapt a strong base model so it better understands how SEC filings present structured financial information in prose and semi-structured text.
+
+---
+
+## Extraction Output
+
+The pipeline is designed to produce structured JSON from raw filing text. A typical output shape looks like this:
 
 ```json
 {
@@ -121,145 +176,129 @@ From each SEC filing, the pipeline produces a structured JSON record containing:
 }
 ```
 
-**Core financial figures** (revenue, net income, EPS, assets, liabilities) are extracted from income statements and balance sheets with field-level accuracy between 92% and 99%.
+### Parser recovery strategy
 
-**Identifiers** (ticker symbol, company name, filing type, fiscal period) are required fields — extraction fails fast and retries if these cannot be reliably parsed.
+LLM output is not always valid JSON on the first pass. The post-processing layer applies a fallback cascade:
 
-**Confidence scores** are attached to each field, allowing downstream consumers to filter on extraction confidence when building datasets.
+1. Direct parse
+2. Strip code fences
+3. Regex-based JSON extraction
+4. Repair common truncation or formatting issues
+5. Field-level fallback extraction
 
-### The 5-Strategy JSON Parser
-
-LLM outputs are not always perfectly formed JSON. The pipeline uses a cascade of 5 recovery strategies applied in sequence until one succeeds:
-
-```
-Direct parse
-    │ (fails)
-    ▼
-Strip code fences (```json ... ```)
-    │ (fails)
-    ▼
-Regex extract JSON-shaped content
-    │ (fails)
-    ▼
-Fix common truncation patterns
-    │ (fails)
-    ▼
-Field-level fallback (extract each field independently)
-```
-
-This cascade turns a fragile "LLM output → JSON.parse" step into a robust extraction engine that handles the realistic variety of model outputs at production throughput.
+This design turns “model output” into something closer to a production extraction system rather than a demo that only works on perfect generations.
 
 ---
 
-## System Architecture
+## Evidence and Benchmarks
 
-```
-SEC Filing Text
-      │
-      ▼
-┌─────────────────┐
-│  Prompt Builder  │  Llama 3.1 chat template — system + extraction instruction
-└────────┬────────┘
-         ▼
-┌─────────────────┐
-│  Llama 3.1 8B   │  NF4 4-bit frozen weights
-│  + LoRA Adapters│  r=16, α=32 on all linear projections
-└────────┬────────┘
-         ▼
-┌─────────────────┐
-│  JSON Parser     │  5-strategy cascade
-│  + Validator     │  Schema validation against required/optional fields
-└────────┬────────┘
-         ▼
-┌─────────────────┐
-│  Redis Cache     │  1ms reads, 1-day TTL, 256 MB LRU
-│  + PostgreSQL    │  Persistent storage + audit trail
-└────────┬────────┘
-         ▼
-┌─────────────────┐
-│  FastAPI Layer   │  /extract, /batch, /health, /metrics (Prometheus), /stats
-└────────┬────────┘
-         ▼
-┌─────────────────┐
-│  Monitoring      │  Drift detection (z-test), latency SLAs, Streamlit dashboard
-└─────────────────┘
-```
+The repository currently presents performance as a combination of notebook-based evaluation, field-level inspection, and operational benchmarking.
 
-### Production Serving
+### Benchmark snapshot
 
-For production throughput, the vLLM backend (PagedAttention + continuous batching) handles raw inference while the FastAPI layer handles prompt construction, post-processing, caching, and monitoring.
+| Metric | Value | Notes |
+|--------|-------|-------|
+| Extraction accuracy | 94% fully correct JSON outputs | Measured on synthetic test data |
+| Field-level accuracy | 92%–99% per field | Measured on synthetic test data |
+| Inference latency (p50) | ~320 ms / document | Notebook benchmark |
+| Throughput | ~60 docs / min | Environment-dependent |
+| Memory footprint | 7.2 GB | NF4 4-bit runtime footprint |
+| Trainable parameters | ~200M / 8B | Approx. 2.5% of total model |
+| Cost per document | ~$0.003 self-hosted estimate | Depends on serving environment |
 
-```bash
-# Standard serving (single-process)
-make serve
+### Evidence sources in the repo
 
-# Production: vLLM backend for higher throughput
-make serve-vllm &
-uvicorn serving.api:app --host 0.0.0.0 --port 8001
-```
+- Notebook-based extraction evaluation.
+- Latency profiling.
+- GPU memory profiling.
+- Drift monitoring and dashboard components.
+- Automated tests for parsing, validation, API behavior, and integration logic.
+
+### Important caveat
+
+Current benchmark claims are based on **synthetic or template-derived evaluation data** unless otherwise noted. Real-world performance on authentic EDGAR filings should be treated as an open evaluation question until a curated real-filing benchmark is published in-repo.
 
 ---
 
-## WIP Integration with Downstream ABSA Analysis
+## Quickstart
 
-The SEC extraction pipeline is the entry point for the full financial intelligence stack. After extraction, the `ticker` and raw filing text feed into two separate downstream consumers:
-
-**→ Financial-Economic-Ticker-Analyzer-Agent** receives the extracted ticker symbol and structured financials, triggering a real-time market intelligence analysis that enriches the extracted data with current price signals, technical indicators, and LLM-generated market context.
-
-**→ Transformer-Aspect-Based-Sentiment-Analysis** receives the raw MD&A and risk factors text alongside the extracted ticker. The ABSA pipeline identifies which specific business aspects (supply chain, revenue outlook, regulatory environment, competitive position) management is positive or negative about — a qualitative layer that numbers alone cannot capture.
-
-```python
-# After extraction, the pipeline posts to both downstream services:
-from sec_extractor import extract_filing
-from absa import FinancialSentimentAnalyzer
-
-# Stage 1: Extract structured data
-result = extract_filing("10-K-filing.txt")
-# → result.ticker = "AAPL", result.revenue = 394328000000, ...
-
-# Stage 2a: Enrich with market intelligence
-# (handled by Financial-Economic-Ticker-Analyzer-Agent webhook)
-
-# Stage 2b: Analyze aspect sentiment from MD&A
-analyzer = FinancialSentimentAnalyzer()
-aspects = analyzer.analyze(
-    result.mdna_text,
-    aspect_categories=[
-        "revenue", "expenses", "competition",
-        "regulation", "supply_chain", "workforce"
-    ]
-)
-# → aspects: {"supply_chain": "negative", "revenue": "positive", ...}
-```
-
----
-
-## Setup
+### 1. Clone the repository
 
 ```bash
 git clone https://github.com/A-Kuo/Fine-Tuned-SEC-Filing-Extraction-Pipeline.git
 cd Fine-Tuned-SEC-Filing-Extraction-Pipeline
-
-pip install -r requirements.txt
-
-cp .env.example .env
-# Add your HuggingFace token (for Llama 3.1 access)
-# Add DAGSHUB_USER_TOKEN if you'll be training (MLFlow experiment tracking)
-# Add KAGGLE_USERNAME/KAGGLE_KEY if you'll use Kaggle for remote training compute
-
-make infra-up       # Start PostgreSQL + Redis (Docker required)
-make db-init        # Initialize schema
-make data           # Generate synthetic training data
-make test           # Run 103 tests — no GPU required
 ```
 
-> **Security Note:** The default `POSTGRES_PASSWORD=finllm_dev` in `docker-compose.yml` is for local development only. Override via environment variable for any non-local deployment.
+### 2. Install dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+### 3. Configure environment variables
+
+```bash
+cp .env.example .env
+```
+
+Then add the variables you need for your path:
+
+- `HF_TOKEN` or equivalent Hugging Face access token for gated model access
+- `DAGSHUB_USER_TOKEN` if training runs are logged to DagsHub / MLflow
+- `KAGGLE_USERNAME` and `KAGGLE_KEY` if using Kaggle for remote GPU runs
+
+### 4. Start local dependencies
+
+```bash
+make infra-up
+```
+
+### 5. Prepare data and run checks
+
+```bash
+make data
+make test
+```
+
+If your current branch still uses explicit DB initialization, run:
+
+```bash
+make db-init
+```
+
+If your branch is moving toward Supabase-managed schema instead, replace that step with the appropriate migration workflow and update this section accordingly.
 
 ---
 
-## Usage Examples
+## How to Run and Inspect the Work
 
-### Single Extraction
+This repository is easiest to inspect through four entry points.
+
+### Option 1: Read the notebooks
+
+The notebooks are the fastest way to understand the training and evaluation story:
+
+- fine-tuning workflow
+- inference evaluation
+- latency and memory profiling
+- GPU assumptions and notebook-specific setup
+
+### Option 2: Run local serving
+
+For a local extraction API:
+
+```bash
+make serve
+```
+
+If you are using the higher-throughput path:
+
+```bash
+make serve-vllm
+uvicorn serving.api:app --host 0.0.0.0 --port 8001
+```
+
+### Option 3: Run a single extraction
 
 ```bash
 curl -X POST http://localhost:8000/extract \
@@ -267,7 +306,8 @@ curl -X POST http://localhost:8000/extract \
   -d '{"text": "SEC FILING - FORM 10-K\nRegistrant: Apple Inc.\n..."}'
 ```
 
-Response:
+Example response:
+
 ```json
 {
   "ticker": "AAPL",
@@ -276,11 +316,15 @@ Response:
   "net_income": 99803000000,
   "eps": 6.42,
   "filing_type": "10-K",
-  "confidence": {"revenue": 0.97, "net_income": 0.95, "eps": 0.93}
+  "confidence": {
+    "revenue": 0.97,
+    "net_income": 0.95,
+    "eps": 0.93
+  }
 }
 ```
 
-### Batch Processing
+### Option 4: Run batch inference
 
 ```bash
 python serving/batch_inference.py \
@@ -288,66 +332,121 @@ python serving/batch_inference.py \
   --server_url http://localhost:8000
 ```
 
-### Training (requires GPU)
+---
 
-Experiment tracking and the model registry run on MLFlow, hosted by
-[DagsHub](https://dagshub.com/A-Kuo/Fine-Tuned-SEC-Filing-Extraction-Pipeline).
-Every training run — local or remote — logs hyperparameters, metrics, and the
-resulting adapter to the same experiment.
+## Training and Notebooks
 
-**Local GPU (fallback path):**
+Training requires GPU access. The repository supports both local GPU workflows and notebook-based remote compute.
+
+### Local GPU path
 
 ```bash
-python scripts/download_model.py     # ~16 GB, requires HF_TOKEN
-
+python scripts/download_model.py
 make train
-# Output: models/llama-sec-v1/ (LoRA adapters only, ~500 MB)
-# Run also logged to MLFlow: make train-mlflow-ui
 ```
 
-**Kaggle Notebooks (primary remote compute):**
+Expected outcome:
+- LoRA adapter artifacts saved locally
+- metrics and training outputs logged through the configured experiment system
+
+### Kaggle path
 
 ```bash
 make train-kaggle
-# Pushes scripts/kaggle_kernel/ to Kaggle, trains on a GPU-enabled kernel,
 ```
 
-I have not yet set up Colab links.
+This path is intended for remote GPU execution where local hardware is not available.
 
-| Notebook | Purpose | Min GPU |
-|----------|---------|---------|
+### Notebook guide
+
+| Notebook | Purpose | Minimum GPU |
+|----------|---------|-------------|
 | `notebooks/train_qlora.ipynb` | QLoRA fine-tuning | T4 (16 GB) |
-| `notebooks/inference_eval.ipynb` | Extraction + evaluation + latency profiling | T4 (16 GB) |
+| `notebooks/inference_eval.ipynb` | Extraction evaluation and profiling | T4 (16 GB) |
 
-### Monitoring
+### What the notebooks are useful for
 
-```bash
-make dashboard      # Streamlit dashboard at localhost:8501
-make monitor        # CLI drift report
-make evaluate       # Accuracy metrics against ground truth
-make benchmark      # Latency/throughput/memory profile
+- validating the training loop on GPU
+- inspecting output quality on sample filings
+- measuring latency and memory usage
+- demonstrating the end-to-end extraction flow outside local infra
 
 ---
 
 ## Testing
 
-The test suite (103 tests) runs entirely without a GPU. Model inference is mocked; the database layer uses in-memory SQLite. CI runs on standard runners.
+The test suite is intended to cover non-GPU logic so that CI can run on standard runners.
 
 ```bash
-make test              # Run all 103 tests
-make test-coverage     # With coverage report
-make lint              # ruff check
-make typecheck         # mypy
+make test
+make test-coverage
+make lint
+make typecheck
 ```
 
-| Test module | Focus | Count |
-|-------------|-------|-------|
-| `test_postprocessing.py` | JSON parsing and validation | 27 |
-| `test_monitoring.py` | Drift detection, evaluation metrics | 24 |
-| `test_database.py` | Cache, storage, graceful degradation | 19 |
-| `test_integration.py` | End-to-end pipeline flows (no GPU) | 11 |
-| `test_api.py` | REST schemas, prompt building | 13 |
-| Other | Config, model loading, utilities | 9 |
+### Current test focus areas
+
+| Test area | Focus |
+|----------|-------|
+| Post-processing | JSON parsing, recovery, validation |
+| Monitoring | drift detection and evaluation metrics |
+| Database / persistence | storage behavior and graceful degradation |
+| Integration | non-GPU end-to-end flows |
+| API | request / response schemas and prompt handling |
+| Utilities | config and helper logic |
+
+If you want the README to remain future-proof, avoid locking the top-level README to an exact test count unless that number is generated automatically in CI.
+
+---
+
+## Monitoring
+
+The repository includes monitoring and evaluation utilities for both model quality and system behavior.
+
+```bash
+make dashboard
+make monitor
+make evaluate
+make benchmark
+```
+
+These commands are intended to support:
+- drift inspection
+- evaluation against reference outputs
+- latency and throughput benchmarking
+- dashboard-based inspection of extraction behavior over time
+
+If the public Streamlit drift dashboard is still active, link it here as an optional external artifact rather than relying on it as the only evidence source.
+
+---
+
+## Planned Integrations
+
+This extraction system is designed to be one component in a broader financial intelligence stack.
+
+Potential downstream consumers include:
+- ticker-driven market intelligence agents
+- aspect-based sentiment analysis over MD&A and risk-factor text
+- dashboarding or agentic visualization layers
+- persistence or registry layers for model outputs and extracted facts
+
+This section should describe integrations as **planned**, **partial**, or **implemented** very explicitly. If a downstream system is not wired into the current branch, avoid language that implies automatic end-to-end orchestration already exists.
+
+---
+
+## Limitations
+
+This repository has several important limitations.
+
+- **Synthetic evaluation bias:** current benchmark claims rely heavily on synthetic or template-derived data.
+- **Real-filing generalization is still the main open question:** performance on authentic EDGAR prose may differ materially.
+- **Gated base model dependency:** some workflows depend on access to Llama 3.1 weights through Hugging Face.
+- **Notebook execution can drift from the main branch:** notebook instructions need periodic reconciliation with the actual repo structure.
+- **Infrastructure references may evolve:** if the project is transitioning from direct PostgreSQL initialization toward Supabase-managed migrations, setup instructions must stay aligned with the current branch.
+- **Upstream dependency exists by design:** this repo is not a full SEC ingestion pipeline and depends on filing text being available from elsewhere.
+- **Downstream integrations may be incomplete:** related systems can be discussed here, but should not be treated as fully operational unless present in this repository or explicitly linked with working interfaces.
+
+For a fuller discussion of risks, assumptions, and intended use, keep `MODEL_CARD.md` aligned with this section.
 
 ---
 
@@ -355,10 +454,10 @@ make typecheck         # mypy
 
 | Repository | Role |
 |-----------|------|
-| [iXRBL Ingestion (Private) ](https://github.com/A-Kuo/sec-edgar-extraction-pipeline) | Upstream: EDGAR ingestion, iXBRL-tagged fact extraction, rate limiting, amendment chains. This repo consumes its filing documents and deterministic facts (`method='xbrl'`) |
-| [WIP Refactored MD&A Human Sentiment](https://github.com/A-Kuo/Transformer-Aspect-Based-Sentiment-Analysis) |
-| [WIP Tickers Agent](https://github.com/A-Kuo/Financial-Economic-Ticker-Analyzer-Agent) | Receives extracted ticker for market intelligence enrichment |
-| [WIP Agentic Framework](https://github.com/A-Kuo/Agentic-Visualization-Framework) | Receives structured output for dashboard generation |
+| [SEC EDGAR extraction pipeline](https://github.com/A-Kuo/sec-edgar-extraction-pipeline) | Upstream ingestion and deterministic iXBRL-tagged fact extraction |
+| [Transformer Aspect-Based Sentiment Analysis](https://github.com/A-Kuo/Transformer-Aspect-Based-Sentiment-Analysis) | Planned downstream qualitative analysis over filing text |
+| [Financial Economic Ticker Analyzer Agent](https://github.com/A-Kuo/Financial-Economic-Ticker-Analyzer-Agent) | Planned downstream market-intelligence enrichment |
+| [Agentic Visualization Framework](https://github.com/A-Kuo/Agentic-Visualization-Framework) | Planned downstream visualization and dashboard generation |
 
 ---
 
@@ -375,4 +474,4 @@ make typecheck         # mypy
 
 ---
 
-*Data is persistent. Engineering makes it useful.*
+*Data is persistent. Data Science makes it useful.*
