@@ -34,15 +34,11 @@ This project sits upstream within EDGAR/iXBRL ingestion, handling extraction of 
 
 ## Project Overview
 
-Financial disclosures in SEC filings are a messy collection. Even when companies use iXBRL tags for their main financial statements, a ton of crucial context and secondary metrics get buried in the narrative sections. This project tackles that problem by using an LLM-based extraction pipeline for untagged SEC prose, filling the gaps where traditional, deterministic parsers fall short.The biggest hurdle with SEC data is that it is incredibly inconsistent. 
+SEC filings are only partially structured. Even when companies provide iXBRL tags for core statement items, important disclosures and secondary metrics still appear in untagged prose, footnotes, and plain-text tables, where deterministic parsers break down. This repository targets that gap with an LLM-based extraction pipeline for converting unstructured SEC text into validated structured financial records. 
 
-Different industries format the same concepts entirely unique ways, and critical insights about growth or margin pressures are often hidden inside dense legal jargon. On top of that, numbers are expressed haphazardly—one filing might say $394,328 million while another says $394.3 billion—and important data like non-GAAP reconciliations frequently live in plain-text tables with zero digital markup. Because metrics like adjusted EBITDA or free cash flow are purposely left untagged, they require a smart, semantic tool to pull them out accurately.
+The system combines a QLoRA fine-tuned Llama 3.1 8B model with a 5-stage JSON fallback parser, schema validation, Redis caching, PostgreSQL persistence, and FastAPI endpoints for online and batch inference. Repo evidence includes 94% fully correct JSON outputs on a synthetic test set, 92–99% field-level accuracy, about 320 ms p50 latency, about 60 docs/min throughput, 7.2 GB NF4 memory usage versus 32 GB FP32, and 103 automated tests runnable without a GPU. 
 
-This project provides everything you need to extract those hidden, unstructured records and turn them into clean data. It includes the core LLM extraction pipeline, code and notebooks for fine-tuning the model, and post-processing logic to validate the outputs. It also comes fully equipped with serving infrastructure for both single-document and batch processing, along with utilities to monitor performance and run comprehensive tests.
-
-This repository is a model-serving and evaluation pipeline for extracting structured financial data from **untagged SEC filing text**. The core idea is simple: use deterministic systems where filings are already machine-tagged, and reserve an LLM-based extraction pipeline for the prose and tables that remain ambiguous, irregular, or entirely untagged.
-
-The pipeline is built around a fine-tuned Llama 3.1 8B model with QLoRA adapters, a post-processing layer that recovers malformed JSON, a validation layer that checks required fields, and a serving layer for online and batch inference. The repo also includes training, notebook-based evaluation, monitoring hooks, and infrastructure for caching and persistence.
+This repo is best understood as the untagged-prose extraction layer in a broader SEC data stack: deterministic systems handle machine-tagged facts upstream, and this pipeline handles the ambiguous text that remains.
 
 ### Worktree
 
