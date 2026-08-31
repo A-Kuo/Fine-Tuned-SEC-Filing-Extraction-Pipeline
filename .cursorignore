@@ -1,4 +1,0 @@
-# Prevent indexing or sending local secrets to the agent context
-.env
-.env.*
-!.env.example
