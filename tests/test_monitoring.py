@@ -221,12 +221,44 @@ class TestEvaluateSingle:
 
 
 class TestSampleMetrics:
-    def test_sample_metrics_valid(self):
+    """generate_sample_metrics() returns a HARDCODED placeholder ("target
+    results from the project spec", per its own docstring) -- not a measured
+    result. These tests check its shape is well-formed, not that 0.94 is
+    "correct" (it isn't a measurement of anything). See evaluate.py's main():
+    the placeholder can only be emitted via an explicit --generate-sample-metrics
+    flag and is tagged is_fabricated_placeholder=True -- these tests guard that
+    contract instead of certifying the number itself.
+    """
+
+    def test_sample_metrics_has_expected_shape(self):
         metrics = generate_sample_metrics()
-        assert metrics["overall_accuracy"] == 0.94
+        assert "overall_accuracy" in metrics
         assert "per_field" in metrics
         assert "company_name" in metrics["per_field"]
-        assert metrics["per_field"]["company_name"]["accuracy"] > 0.95
+        assert 0.0 <= metrics["overall_accuracy"] <= 1.0
+
+    def test_main_requires_explicit_flag_for_placeholder(self, monkeypatch, capsys):
+        import sys
+        from evaluation.evaluate import main
+
+        monkeypatch.setattr(sys, "argv", ["evaluate.py"])
+        with pytest.raises(SystemExit):
+            main()
+        assert "generate-sample-metrics" in capsys.readouterr().err
+
+    def test_generate_sample_metrics_flag_tags_output_as_fabricated(self, monkeypatch, tmp_path):
+        import sys
+        from evaluation.evaluate import main
+
+        output_path = tmp_path / "metrics.json"
+        monkeypatch.setattr(
+            sys, "argv",
+            ["evaluate.py", "--generate-sample-metrics", "--output", str(output_path)],
+        )
+        main()
+
+        saved = json.loads(output_path.read_text())
+        assert saved["is_fabricated_placeholder"] is True
 
 
 if __name__ == "__main__":

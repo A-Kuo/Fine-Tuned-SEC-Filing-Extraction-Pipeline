@@ -40,14 +40,17 @@ class MetricsCallback(TrainerCallback):
         }
         self.metrics_log.append(entry)
 
-        # Log key metrics
+        # Log key metrics. The final call after training ends logs aggregate
+        # metrics (train_loss, train_runtime, ...) with no "learning_rate" key
+        # -- lr is legitimately None there, not a missing-data bug.
         loss = logs.get("loss", logs.get("train_loss"))
         lr = logs.get("learning_rate")
         if loss is not None:
+            lr_part = f"LR: {lr:.2e}" if lr is not None else "LR: n/a (final summary)"
             logger.info(
                 f"Step {state.global_step} | "
                 f"Loss: {loss:.4f} | "
-                f"LR: {lr:.2e}" + (f" | Epoch: {state.epoch:.2f}" if state.epoch else "")
+                f"{lr_part}" + (f" | Epoch: {state.epoch:.2f}" if state.epoch else "")
             )
 
     def on_train_end(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):

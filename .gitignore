@@ -61,6 +61,13 @@ data/raw_edgar/
 *.key
 secrets/
 
+# ─── Personal / resume material (never belongs in a public-facing repo) ──────
+docs/RESUME_SAFE_CLAIMS.md
+**/*resume*
+**/*RESUME*
+**/*_CV_*
+**/*_CV.*
+
 # ─── OS ──────────────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
@@ -68,3 +75,17 @@ research/
 
 # Repomix
 repomix-output.xml
+
+# ─── Session audit trail (agent-generated, not public-facing docs) ───────────
+docs/TRUTH_AUDIT.md
+docs/UPGRADE_REPORT.md
+docs/NEXT_EXPERIMENTS.md
+
+# ─── Agent/tooling instructions (not user-facing) ─────────────────────────────
+# NOTE: MODEL_CARD.md and docs/API_CONTRACTS.md were deliberately kept OUT of
+# this list -- both are real public-facing docs (a model card, an API design
+# doc) linked from README.md/CITATION.cff, not agent scratch files.
+AGENTS.md
+research/AGENT_RESEARCH_*.md
+AGENTS.md
+/research

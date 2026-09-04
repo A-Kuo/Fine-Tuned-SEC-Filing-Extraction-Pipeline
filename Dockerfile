@@ -56,9 +56,12 @@ RUN mkdir -p /app/models /app/data /app/results /app/logs && \
 # Switch to non-root user
 USER appuser
 
-# Health check
+# Health check. Uses urllib (stdlib) rather than `requests` -- the latter is
+# not a declared dependency (only httpx is), so this always failed with
+# ModuleNotFoundError, permanently keeping the container "unhealthy" no
+# matter how well the app itself was running.
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD python -c "import requests; requests.get('http://localhost:8000/health')" || exit 1
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=5)" || exit 1
 
 # Expose ports
 EXPOSE 8000 8001

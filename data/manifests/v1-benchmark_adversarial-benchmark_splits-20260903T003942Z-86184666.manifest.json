@@ -1,0 +1,13 @@
+{
+  "dataset_version": "v1-benchmark_adversarial-benchmark_splits-20260903T003942Z-86184666",
+  "schema_version": 1,
+  "source_split": "benchmark_adversarial",
+  "template_family": "benchmark_splits",
+  "checksum": "86184666b38f983b1bdfd1564d9df551c87a91cae220832ea5985e0ddd5c8b99",
+  "record_count": 9,
+  "quarantined_count": 0,
+  "created_at": "2026-09-03T00:39:42.797121+00:00",
+  "lineage": {
+    "builder": "evaluation/benchmark_splits.py"
+  }
+}

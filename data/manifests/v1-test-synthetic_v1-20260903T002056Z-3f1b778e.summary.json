@@ -1,0 +1,19 @@
+{
+  "dataset_version": "v1-test-synthetic_v1-20260903T002056Z-3f1b778e",
+  "valid_count": 10,
+  "quarantined_count": 0,
+  "field_null_rates": {
+    "filing_id": 0.0,
+    "company_name": 0.0,
+    "ticker": 0.0,
+    "filing_type": 0.0,
+    "date": 0.0,
+    "fiscal_year_end": 0.0,
+    "revenue": 0.0,
+    "net_income": 0.0,
+    "total_assets": 0.0,
+    "total_liabilities": 0.0,
+    "eps": 0.0,
+    "sector": 0.0
+  }
+}

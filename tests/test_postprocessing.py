@@ -130,6 +130,42 @@ class TestParseExtraction:
         with pytest.raises(json.JSONDecodeError):
             parse_extraction("This is not JSON at all")
 
+    def test_regex_fallback_extracts_company_name_from_prose(self):
+        """Stage 5 (field-level regex fallback) had zero dedicated tests
+        before this -- non-JSON prose with a matchable "Registrant:" pattern
+        should still recover a partial result rather than raise."""
+        raw = "Registrant: Visa Inc.\nFORM 10-K\nFiled: 2024-01-15"
+        result = parse_extraction(raw)
+        assert result.company_name == "Visa Inc."
+        assert result.filing_type == "10-K"
+        assert result.filled_fields > 0
+
+    def test_regex_fallback_extracts_revenue_with_unit_word(self):
+        raw = "Some unstructured commentary about the filing.\nRevenue: $5.2 billion for the year."
+        result = parse_extraction(raw)
+        assert result.revenue is not None
+        assert "5.2" in result.revenue
+
+    def test_regex_fallback_extracts_ticker_in_parens(self):
+        raw = "Apple Inc. (AAPL) filed its annual report."
+        result = parse_extraction(raw)
+        assert result.ticker == "AAPL"
+
+    def test_regex_fallback_partial_result_has_fewer_fields_than_full_json(self):
+        """Fallback recovery is explicitly partial -- it should not silently
+        claim more fields than it actually found a pattern for."""
+        raw = "Registrant: Visa Inc."
+        result = parse_extraction(raw)
+        assert result.filled_fields == 1
+        assert result.company_name == "Visa Inc."
+        assert result.revenue is None
+
+    def test_garbage_with_no_matchable_patterns_still_raises(self):
+        """Distinguishes stage 5 succeeding (some field matched) from the
+        true no-recovery-possible case tested by test_empty_json_raises."""
+        with pytest.raises(json.JSONDecodeError):
+            parse_extraction("The quick brown fox jumps over the lazy dog.")
+
     def test_empty_object(self):
         """Model returns {}."""
         result = parse_extraction("{}")

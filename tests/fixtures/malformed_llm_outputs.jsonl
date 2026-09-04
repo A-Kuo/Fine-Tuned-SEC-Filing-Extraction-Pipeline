@@ -1,0 +1,7 @@
+{"name": "clean_json", "raw_output": "{\"company_name\": \"Acme Corp\", \"ticker\": \"ACME\", \"revenue\": \"1000000\"}", "expected_stage": "direct"}
+{"name": "fenced_json", "raw_output": "```json\n{\"company_name\": \"Acme Corp\", \"ticker\": \"ACME\"}\n```", "expected_stage": "fence_strip"}
+{"name": "trailing_prose", "raw_output": "Here is the extracted data:\n{\"company_name\": \"Acme Corp\", \"ticker\": \"ACME\"}\nLet me know if you need anything else!", "expected_stage": "regex_extract"}
+{"name": "truncated_1_brace", "raw_output": "{\"company_name\": \"Acme Corp\", \"ticker\": \"ACME\"", "expected_stage": "truncation_repair"}
+{"name": "truncated_4_braces_unfixable", "raw_output": "{\"a\": {\"b\": {\"c\": {\"d\": \"Acme Corp\"", "expected_stage": null, "expected_raises": true}
+{"name": "garbage_with_regex_matchable_fields", "raw_output": "Registrant: Acme Corp\nFORM 10-K\nRevenue: $5.2 million", "expected_stage": "field_fallback"}
+{"name": "pure_garbage", "raw_output": "The quick brown fox jumps over the lazy dog.", "expected_stage": null, "expected_raises": true}

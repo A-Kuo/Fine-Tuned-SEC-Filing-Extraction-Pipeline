@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.core.chat_template import LLAMA31_CHAT_TEMPLATE
 from src.extraction.inference import EXTRACTION_INSTRUCTION, SYSTEM_PROMPT, ExtractionEngine
+from src.extraction.postprocessing import ExtractionResult
 
 
 def _make_engine(chat_template):
@@ -85,6 +86,37 @@ class TestRealTemplateIsUsed:
         )
         assert prompt == expected
         assert prompt.endswith("<|start_header_id|>assistant<|end_header_id|>\n\n")
+
+
+class TestConfidenceScoringDispatch:
+    """extraction.confidence_scoring defaults to "heuristic" (real, working).
+    "logprob" is a documented scaffold (see
+    ExtractionEngine._estimate_confidence_from_logprobs()'s docstring) that
+    must raise clearly rather than silently returning an unverified number.
+    """
+
+    def test_defaults_to_heuristic_scoring(self):
+        engine = ExtractionEngine(model=SimpleNamespace(), confidence_scoring="heuristic")
+        result = ExtractionResult(company_name="Acme", filing_type="10-K", date="2024-01-01")
+        score = engine._estimate_confidence(result, [])
+        assert 0.0 <= score <= 1.0
+
+    def test_heuristic_none_extraction_is_zero_confidence(self):
+        engine = ExtractionEngine(model=SimpleNamespace(), confidence_scoring="heuristic")
+        assert engine._estimate_confidence(None, []) == 0.0
+
+    def test_logprob_scoring_raises_not_implemented(self):
+        engine = ExtractionEngine(model=SimpleNamespace(), confidence_scoring="logprob")
+        result = ExtractionResult(company_name="Acme")
+        with pytest.raises(NotImplementedError):
+            engine._estimate_confidence(result, [], raw_output="{}", generation_scores=None)
+
+    def test_explicit_confidence_scoring_overrides_config(self):
+        """Passing confidence_scoring explicitly must win over whatever
+        config.yaml says, so tests/callers aren't at the mercy of the
+        repo-wide default changing under them."""
+        engine = ExtractionEngine(model=SimpleNamespace(), confidence_scoring="heuristic")
+        assert engine._confidence_scoring == "heuristic"
 
 
 if __name__ == "__main__":

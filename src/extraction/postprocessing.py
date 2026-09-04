@@ -8,6 +8,20 @@ Key design decision: we validate but don't reject partial results. A filing
 with company_name + filing_type but missing revenue is still useful-—we return
 it with a lower confidence score and flag the missing fields. This is better
 than discarding the entire extraction.
+
+parse_extraction()'s 5 recovery stages are sequential and mutually exclusive
+(first success wins) -- a state machine, even without a dedicated class for
+it:
+
+    direct parse -> fence_strip -> regex_extract -> truncation_repair -> field_fallback -> raise
+        |success       |success       |success           |success            |success
+        v              v              v                   v                   v
+     return         return         return              return              return
+
+Pass a ParseTelemetry (src/extraction/parser_telemetry.py) to parse_extraction()
+to record which stage a given call actually traversed and why each one it
+passed through failed; see evaluation/parser_telemetry_report.py for the
+aggregate report this feeds.
 """
 
 import json
@@ -19,6 +33,7 @@ from typing import Any, Optional
 from loguru import logger
 
 from src.core.config import load_config
+from src.extraction.parser_telemetry import ParseTelemetry
 
 
 @dataclass
@@ -74,7 +89,10 @@ class ValidationError(Exception):
 
 # ─── JSON Parsing ────────────────────────────────────────────────────────────
 
-def parse_extraction(raw_output: str) -> ExtractionResult:
+def parse_extraction(
+    raw_output: str,
+    telemetry: "ParseTelemetry | None" = None,
+) -> ExtractionResult:
     """Parse model output into ExtractionResult.
 
     Handles common LLM output quirks:
@@ -85,6 +103,9 @@ def parse_extraction(raw_output: str) -> ExtractionResult:
 
     Args:
         raw_output: Raw text from model generation.
+        telemetry: Optional ParseTelemetry to record which stage recovered
+            the result (or why each stage failed). Purely additive -- pass
+            None (the default) for the original behavior with zero overhead.
 
     Returns:
         ExtractionResult with whatever fields were successfully parsed.
@@ -93,24 +114,34 @@ def parse_extraction(raw_output: str) -> ExtractionResult:
         json.JSONDecodeError if no valid JSON can be extracted.
     """
     text = raw_output.strip()
+    if telemetry is not None:
+        telemetry.raw_output_chars = len(raw_output)
 
     # Strategy 1: Try direct parse
     parsed = _try_parse(text)
     if parsed is not None:
+        if telemetry: telemetry.record("direct", True)
         return _dict_to_result(parsed)
+    if telemetry: telemetry.record("direct", False, reason_code="not_valid_json")
 
     # Strategy 2: Strip markdown fences
     stripped = _strip_code_fences(text)
     parsed = _try_parse(stripped)
     if parsed is not None:
+        if telemetry: telemetry.record("fence_strip", True)
         return _dict_to_result(parsed)
+    if telemetry: telemetry.record("fence_strip", False, reason_code="not_valid_json_after_strip")
 
     # Strategy 3: Extract JSON object with regex
     json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', text, re.DOTALL)
     if json_match:
         parsed = _try_parse(json_match.group())
         if parsed is not None:
+            if telemetry: telemetry.record("regex_extract", True)
             return _dict_to_result(parsed)
+        if telemetry: telemetry.record("regex_extract", False, reason_code="matched_braces_not_valid_json")
+    elif telemetry:
+        telemetry.record("regex_extract", False, reason_code="no_json_found")
 
     # Strategy 4: Try to fix truncated JSON (missing closing brace)
     fixed = _fix_truncated_json(text)
@@ -118,13 +149,21 @@ def parse_extraction(raw_output: str) -> ExtractionResult:
         parsed = _try_parse(fixed)
         if parsed is not None:
             logger.warning("Parsed truncated JSON (added missing braces)")
+            if telemetry: telemetry.record("truncation_repair", True)
             return _dict_to_result(parsed)
+        if telemetry: telemetry.record("truncation_repair", False, reason_code="repair_still_not_valid_json")
+    elif telemetry:
+        telemetry.record("truncation_repair", False, reason_code="no_json_start_or_brace_mismatch_too_large")
 
     # Strategy 5: Extract key-value pairs with regex as last resort
     result = _regex_extract(text)
     if result.filled_fields > 0:
         logger.warning(f"Fell back to regex extraction ({result.filled_fields} fields)")
+        if telemetry:
+            telemetry.record("field_fallback", True, fields_recovered=result.filled_fields)
         return result
+    if telemetry:
+        telemetry.record("field_fallback", False, fields_recovered=0, reason_code="no_fields_matched")
 
     raise json.JSONDecodeError("No valid JSON found in model output", text, 0)
 

@@ -1,5 +1,7 @@
 # Pipeline API Contracts
 
+**Status: target contract for a planned multi-repo integration, not a deployed architecture.** This repository implements `FinDocAnalyzer` (`serving/api.py`) only. `TickerAgent` and `VizFramework` are separate, planned downstream repos — see README's [Related Repositories](../README.md#related-repositories) table, where both are marked "Planned — no working integration exists in this repo." No webhook registration, ingestion, or rendering endpoint described below has been implemented or run against a real `TickerAgent`/`VizFramework` instance; the ports and payloads below are a design proposal for when those repos exist, not evidence of a live three-service system.
+
 This document defines the API contracts between the three pipeline services.
 
 ## Overview

@@ -29,6 +29,15 @@ numpy>=1.24.0
 pandas>=2.0.0
 scikit-learn>=1.3.0
 jsonschema>=4.20.0
+beautifulsoup4>=4.12.0
+tomli>=2.0.0; python_version < "3.11"
+
+# training/callbacks.py imports TrainerCallback/TrainerState/TrainingArguments
+# for tests/test_callbacks.py -- transformers' base install does NOT require
+# torch (confirmed via `pip show transformers`: torch is an optional backend,
+# not a hard dependency), so this stays consistent with "no torch/vLLM/GPU
+# in CI." Without this, test_callbacks.py fails to even collect.
+transformers>=4.35.0
 
 # Dev / test
 pytest>=7.4.0

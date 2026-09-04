@@ -46,9 +46,21 @@ class TestFinancialParsing:
         assert PostgresStorage._parse_financial("not a number") is None
 
     def test_negative_notation(self):
-        # Should still extract the numeric part
+        """A net loss (e.g. net_income = '-$12.5 billion') must stay negative.
+
+        Before the numeric-parsing consolidation into
+        src/extraction/numeric_normalize.py, this method silently dropped the
+        sign (returned +12.5e9), while src/extraction/normalizer.py's
+        parse_numeric_value() -- the extraction pipeline's own parser for the
+        exact same string shape -- already preserved it correctly. The two
+        implementations disagreed on this exact case. Consolidating onto one
+        implementation fixed the storage-layer sign-dropping bug rather than
+        the other way around: a stored net_income of "$12.5 billion" for a
+        company that reported a $12.5 billion LOSS would be a real, serious
+        correctness bug for anyone querying that column.
+        """
         result = PostgresStorage._parse_financial("$-12.5 billion")
-        assert result == pytest.approx(12.5e9)  # Extracts magnitude
+        assert result == pytest.approx(-12.5e9)
 
 
 # ─── Redis Cache Logic ───────────────────────────────────────────────────────

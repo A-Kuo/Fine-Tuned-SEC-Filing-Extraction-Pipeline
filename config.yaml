@@ -86,6 +86,12 @@ serving:
   # Downstream services for pipeline status / circuit breaker (optional)
   ticker_agent_url: "http://localhost:8002"
   viz_framework_url: "http://localhost:8003"
+  # Optional vLLM server this API can offload generation to instead of
+  # loading the model in-process. Empty by default -- must be a DIFFERENT
+  # host:port than `host`/`port` above (this API's own bind address); a
+  # prior version of lifespan() pinged its own not-yet-listening address
+  # here, which always failed, permanently disabling this code path.
+  vllm_url: ""
 
 security:
   require_api_key: false
@@ -161,3 +167,8 @@ extraction:
     - "eps"
   confidence_threshold: 0.7
   fallback_on_validation_failure: true
+  # "heuristic" (default, real/working) or "logprob" (a documented SCAFFOLD
+  # that raises NotImplementedError -- see
+  # ExtractionEngine._estimate_confidence_from_logprobs()'s docstring in
+  # src/extraction/inference.py for why it isn't implemented yet).
+  confidence_scoring: "heuristic"

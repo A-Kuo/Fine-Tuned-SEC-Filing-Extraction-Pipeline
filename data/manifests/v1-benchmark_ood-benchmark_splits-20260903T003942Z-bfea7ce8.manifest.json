@@ -1,0 +1,13 @@
+{
+  "dataset_version": "v1-benchmark_ood-benchmark_splits-20260903T003942Z-bfea7ce8",
+  "schema_version": 1,
+  "source_split": "benchmark_ood",
+  "template_family": "benchmark_splits",
+  "checksum": "bfea7ce8426f6fbe544c950dac5d173db1b233d994ec9785ded1d7a65b5997c2",
+  "record_count": 2,
+  "quarantined_count": 0,
+  "created_at": "2026-09-03T00:39:42.803389+00:00",
+  "lineage": {
+    "builder": "evaluation/benchmark_splits.py"
+  }
+}

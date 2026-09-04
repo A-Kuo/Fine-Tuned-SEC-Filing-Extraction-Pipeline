@@ -1,0 +1,13 @@
+{
+  "dataset_version": "v1-test-synthetic_v1-20260903T002056Z-3f1b778e",
+  "schema_version": 1,
+  "source_split": "test",
+  "template_family": "synthetic_v1",
+  "checksum": "3f1b778e68d607daece2320c2ac94e81a2df1c6a0a8cb1913c1d72c1c67148e7",
+  "record_count": 10,
+  "quarantined_count": 0,
+  "created_at": "2026-09-03T00:20:56.852349+00:00",
+  "lineage": {
+    "source_file": "data\\sec_filings_test.jsonl"
+  }
+}

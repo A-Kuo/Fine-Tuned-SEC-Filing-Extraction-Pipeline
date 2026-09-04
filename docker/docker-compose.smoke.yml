@@ -1,0 +1,64 @@
+version: "3.9"
+
+# Self-contained smoke-test stack: API + Redis + PostgreSQL together, so a
+# real extraction request can be fired end-to-end without depending on a
+# separately-managed Postgres/Redis (unlike docker/docker-compose.yml, whose
+# fin-doc-api expects host.docker.internal to already have both running).
+#
+# Scope: this proves the API/DB/Redis wiring and the /extract HTTP contract.
+# It does NOT prove real LLM inference -- there is no GPU here and no
+# HF_TOKEN is passed in, so the fine-tuned Llama 3.1 call will fail to load
+# and the API is expected to return a graceful error/degraded response for
+# that specific request, not 5xx or hang. See evaluation/results/ for the
+# separate GPU-backed model-load/accuracy evidence (Kaggle T4).
+#
+# Run: python scripts/smoke_test.py
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: finllm
+      POSTGRES_PASSWORD: finllm_dev
+      POSTGRES_DB: financial_llm
+    ports:
+      - "5432:5432"
+    volumes:
+      - ../scripts/init_db.sql:/docker-entrypoint-initdb.d/01_init.sql
+      - ../scripts/init_normalized_schema.sql:/docker-entrypoint-initdb.d/02_init_normalized_schema.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U finllm"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: finllm
+      POSTGRES_PASSWORD: finllm_dev
+      POSTGRES_DB: financial_llm
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      LOG_LEVEL: INFO
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy

@@ -5,13 +5,25 @@ Measures the key performance metrics cited in the README:
 - Throughput (documents/minute)
 - Memory footprint (GPU MB)
 
-Runs in two modes:
-1. Live benchmark: sends requests to running server, measures end-to-end
-2. Simulated benchmark: generates realistic metrics for the README
+Runs in two modes, and one of --server/--simulate must be passed explicitly --
+there is no silent default. A prior version of this script ran
+simulate_benchmark() whenever --server was omitted, --simulate flag or not,
+so `python evaluation/benchmark.py` with zero arguments silently fabricated
+numbers and wrote them to results/benchmark.json indistinguishable from a
+real run. Every simulated result is now tagged is_simulated: true and written
+to a distinctly-named file so it can never be mistaken for or silently
+overwrite a live one.
+
+1. Live benchmark (--server): sends requests to a running server, measures
+   real end-to-end latency. This is the only mode that produces a number
+   citable as a measured result.
+2. Simulated benchmark (--simulate): generates numbers from a hand-picked
+   latency distribution (NOT measured, NOT derived from any real run) --
+   useful only for exercising the report-writing code path without a GPU/server.
 
 Usage:
-    python evaluation/benchmark.py --simulate          # No GPU needed
-    python evaluation/benchmark.py --server http://localhost:8000  # Live
+    python evaluation/benchmark.py --server http://localhost:8000  # Live, real result
+    python evaluation/benchmark.py --simulate                      # Fabricated, for testing this script only
 """
 
 import argparse
@@ -26,7 +38,7 @@ from rich.console import Console
 from rich.table import Table
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from src.config import load_config, get_project_root
+from src.core.config import load_config, get_project_root
 
 console = Console()
 
@@ -58,6 +70,7 @@ def simulate_benchmark(n_docs: int = 200, seed: int = 42) -> dict:
     throughput = n_docs / total_time_s * 60  # docs/min
 
     return {
+        "is_simulated": True,
         "n_documents": n_docs,
         "total_time_seconds": round(total_time_s, 1),
         "latency": {
@@ -105,8 +118,11 @@ async def live_benchmark(
     sample_path = data_dir / "sec_filings_test.jsonl"
 
     if not sample_path.exists():
-        console.print("[yellow]Test data not found. Run download_dataset.py first.[/yellow]")
-        return simulate_benchmark(n_docs)
+        console.print(
+            "[red]Test data not found (run scripts/download_dataset.py first). "
+            "Refusing to silently substitute simulated numbers for a live run.[/red]"
+        )
+        return {}
 
     # Load test documents
     docs = []
@@ -155,6 +171,7 @@ async def live_benchmark(
     total_time_s = sum(latencies) / 1000
 
     return {
+        "is_simulated": False,
         "n_documents": n_docs,
         "successful": len(latencies),
         "errors": errors,
@@ -179,6 +196,12 @@ def print_results(results: dict) -> None:
             "(live run returned no successful requests or empty payload).[/red]"
         )
         return
+
+    if results.get("is_simulated"):
+        console.print(
+            "\n[bold red]WARNING: these are FABRICATED numbers (--simulate), "
+            "not a measured benchmark.[/bold red]"
+        )
 
     console.print("\n[bold]═══ Benchmark Results ═══[/bold]\n")
 
@@ -218,16 +241,35 @@ def print_results(results: dict) -> None:
 
 def main():
     parser = argparse.ArgumentParser(description="Benchmark extraction performance")
-    parser.add_argument("--server", type=str, default=None, help="Server URL for live benchmark")
-    parser.add_argument("--simulate", action="store_true", help="Generate simulated metrics")
+    parser.add_argument("--server", type=str, default=None, help="Server URL for a live, real benchmark")
+    parser.add_argument(
+        "--simulate", action="store_true",
+        help="Generate FABRICATED metrics (not measured) -- only for testing this script's report format",
+    )
     parser.add_argument("--n-docs", type=int, default=200, help="Number of documents")
-    parser.add_argument("--output", type=str, default="results/benchmark.json")
+    parser.add_argument(
+        "--output", type=str, default=None,
+        help="Output path (default: results/benchmark.json for --server, "
+             "results/benchmark.simulated.json for --simulate)",
+    )
     args = parser.parse_args()
 
-    if args.server:
+    if args.server and args.simulate:
+        parser.error("Pass exactly one of --server or --simulate, not both.")
+    elif args.server:
         results = asyncio.run(live_benchmark(args.server, args.n_docs))
-    else:
+        default_output = "results/benchmark.json"
+    elif args.simulate:
         results = simulate_benchmark(args.n_docs)
+        default_output = "results/benchmark.simulated.json"
+    else:
+        # No silent default: this exact branch used to fall through to
+        # simulate_benchmark() regardless of --simulate, which is how
+        # fabricated numbers ended up looking like a real benchmark result.
+        parser.error(
+            "Pass --server <url> for a real benchmark, or --simulate to "
+            "explicitly generate fabricated numbers for testing this script."
+        )
 
     print_results(results)
 
@@ -235,7 +277,7 @@ def main():
         console.print("\n[red]Benchmark failed — not writing incomplete JSON.[/red]")
         sys.exit(1)
 
-    output_path = Path(args.output)
+    output_path = Path(args.output or default_output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "w") as f:
         json.dump(results, f, indent=2)

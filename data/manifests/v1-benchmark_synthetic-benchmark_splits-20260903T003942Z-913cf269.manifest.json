@@ -1,0 +1,13 @@
+{
+  "dataset_version": "v1-benchmark_synthetic-benchmark_splits-20260903T003942Z-913cf269",
+  "schema_version": 1,
+  "source_split": "benchmark_synthetic",
+  "template_family": "benchmark_splits",
+  "checksum": "913cf2698d17465919974bdcf2307d940239cc4c071aa0dc2d4b2fdb2b6e6ec8",
+  "record_count": 1,
+  "quarantined_count": 0,
+  "created_at": "2026-09-03T00:39:42.764627+00:00",
+  "lineage": {
+    "builder": "evaluation/benchmark_splits.py"
+  }
+}

@@ -24,6 +24,7 @@ from datetime import datetime
 from pathlib import Path
 
 import httpx
+from bs4 import BeautifulSoup
 from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -157,6 +158,36 @@ def fetch_filing_text(client: httpx.Client, url: str, limiter: RateLimiter, conf
     return r.text
 
 
+def html_to_visible_text(html: str) -> str:
+    """Strip an EDGAR filing document down to the visible text a human reader
+    (or the section-heading regexes in src/extraction/section_parser.py) would
+    see -- not the raw HTML/inline-XBRL markup.
+
+    This matters more than it looks: EDGAR renders 10-K prose with inline
+    XBRL tagging applied per-word or per-phrase (`<ix:nonFraction>`, nested
+    `<span>`s, etc.), so without this step the on-disk .txt this repo trains
+    and evaluates against is markup soup, not prose -- the extraction
+    pipeline was written and tuned against clean text and was never actually
+    exercised against what EDGAR really serves until this function existed.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    for tag in soup(["script", "style"]):
+        tag.decompose()
+    # The entire machine-readable inline-XBRL block (<ix:header>, tag/context
+    # definitions) lives inside <div style="display:none">...</div> right
+    # after <body>. It renders as nothing in a browser, but get_text() below
+    # doesn't know CSS -- without this it's the first ~15K chars of "text".
+    for tag in soup.find_all(style=lambda v: v and "display:none" in v.replace(" ", "")):
+        tag.decompose()
+    for tag in soup.find_all("ix:header"):
+        tag.decompose()
+    text = soup.get_text(separator="\n")
+    # Collapse the run of blank lines BeautifulSoup's per-tag newlines produce
+    # without collapsing genuine paragraph breaks down to nothing.
+    lines = [line.strip() for line in text.splitlines()]
+    return "\n".join(line for line in lines if line)
+
+
 def chunk_text(text: str, max_chars: int, overlap: int) -> list[str]:
     """Chunk long filings for model context limits (character-based)."""
     if len(text) <= max_chars:
@@ -196,6 +227,30 @@ def clear_checkpoint(raw_dir: Path) -> None:
         cp.unlink()
 
 
+def rebuild_manifest(raw_dir: Path) -> list[dict]:
+    """Rebuild manifest.jsonl by scanning every *.meta.json actually on disk.
+
+    Previously the manifest was written with mode="w" whenever --resume was
+    not passed, which truncated it on every fresh run -- even though the
+    actual .txt/.meta.json/.xbrl.json files from earlier runs were untouched
+    (the checkpoint that gated re-fetching had already been cleared on a
+    completed run, so nothing was lost except the manifest's record of it).
+    Downstream code (schema_conformance.py, evaluate_real_filings.py,
+    sync_normalized_from_pipeline.py) all treat manifest.jsonl as the source
+    of truth for "which real filings exist" -- silently losing entries there
+    broke that even though the underlying evidence was never actually gone.
+    Rebuilding from disk on every run makes the manifest self-healing
+    regardless of --resume.
+    """
+    entries = []
+    for meta_path in sorted(raw_dir.glob("*.meta.json")):
+        try:
+            entries.append(json.loads(meta_path.read_text(encoding="utf-8")))
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning(f"Skipping unreadable meta file {meta_path}: {e}")
+    return entries
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
@@ -226,7 +281,6 @@ def main():
     checkpoint = load_checkpoint(raw_dir) if args.resume else {"fetched": [], "total": 0}
     already_fetched: set[str] = set(checkpoint.get("fetched", []))
     total = checkpoint.get("total", 0)
-    manifest: list[dict] = []
 
     with httpx.Client(follow_redirects=True) as client:
         ticker_map = load_company_tickers(client, limiter, config)
@@ -265,10 +319,15 @@ def main():
                 url = filing_url(cik, acc, primary)
 
                 try:
-                    text = fetch_filing_text(client, url, limiter, config)
+                    raw_html = fetch_filing_text(client, url, limiter, config)
                 except Exception as e:
                     logger.error(f"Failed download {url}: {e}")
                     continue
+
+                # Keep the raw HTML for XBRL fact scraping below (it needs the
+                # inline ix:/xml: tags), but persist only the visible text --
+                # see html_to_visible_text()'s docstring for why this matters.
+                text = html_to_visible_text(raw_html)
 
                 safe_acc = acc.replace("-", "_")
                 base = raw_dir / f"{ticker}_{safe_acc}"
@@ -287,15 +346,12 @@ def main():
                     "text_path": str(txt_path.relative_to(get_project_root())),
                 }
 
-                meta_path = base.with_suffix(".meta.json")
-                meta_path.write_text(json.dumps(record, indent=2), encoding="utf-8")
-
                 # Optional XBRL parse (best-effort)
                 try:
                     sys.path.insert(0, str(Path(__file__).parent))
                     from parse_xbrl import extract_xbrl_facts
 
-                    facts = extract_xbrl_facts(text)
+                    facts = extract_xbrl_facts(raw_html)
                     if facts:
                         fact_path = base.with_suffix(".xbrl.json")
                         fact_path.write_text(json.dumps(facts, indent=2), encoding="utf-8")
@@ -305,7 +361,14 @@ def main():
 
                 chunks = chunk_text(text, max_chars=max_chars, overlap=200)
                 record["chunks"] = len(chunks)
-                manifest.append(record)
+
+                # Written only now that xbrl_path/chunks are set -- a meta
+                # file that omits them (this used to write before both were
+                # known) can't be used by rebuild_manifest() below to
+                # reconstruct a complete manifest entry from disk alone.
+                meta_path = base.with_suffix(".meta.json")
+                meta_path.write_text(json.dumps(record, indent=2), encoding="utf-8")
+
                 total += 1
                 already_fetched.add(acc)
 
@@ -314,9 +377,9 @@ def main():
                 logger.info(f"Saved {ticker} {acc} ({len(text)} chars, {len(chunks)} chunks) [{total}/{max_run}]")
 
         manifest_path = raw_dir / "manifest.jsonl"
-        mode = "a" if args.resume else "w"
-        with open(manifest_path, mode, encoding="utf-8") as mf:
-            for m in manifest:
+        all_entries = rebuild_manifest(raw_dir)
+        with open(manifest_path, "w", encoding="utf-8") as mf:
+            for m in all_entries:
                 mf.write(json.dumps(m) + "\n")
 
         if total >= max_run:

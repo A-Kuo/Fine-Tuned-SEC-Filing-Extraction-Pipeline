@@ -72,17 +72,17 @@ db-init:  ## Initialize database schema
 
 # ─── Monitoring & Evaluation ─────────────────────────────────────────────────
 
-monitor:  ## Run monitoring check
-	python monitoring/monitor.py --full-report
+monitor:  ## Run monitoring check with FABRICATED demo data (pass real numbers yourself for a real check: python monitoring/monitor.py --current-accuracy X --baseline-accuracy Y --latencies-file F)
+	python monitoring/monitor.py --demo --full-report
 
-dashboard:  ## Start Streamlit monitoring dashboard
+dashboard:  ## Start Streamlit monitoring dashboard (shows a "DEMO DATA" banner if Postgres is unavailable/empty)
 	streamlit run monitoring/dashboard.py
 
-benchmark:  ## Run performance benchmark
-	python evaluation/benchmark.py --simulate --output results/benchmark.json
+benchmark:  ## Run a FABRICATED performance benchmark (for a real one: python evaluation/benchmark.py --server <url>)
+	python evaluation/benchmark.py --simulate
 
-evaluate:  ## Evaluate model accuracy
-	python evaluation/evaluate.py --generate-sample-metrics --output results/metrics.json
+evaluate:  ## Emit the FABRICATED placeholder accuracy numbers (for a real evaluation: python evaluation/evaluate.py --predictions <file> --ground_truth <file>)
+	python evaluation/evaluate.py --generate-sample-metrics
 
 # ─── Pipeline Integration ────────────────────────────────────────────────────
 

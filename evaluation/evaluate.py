@@ -27,7 +27,7 @@ from rich.console import Console
 from rich.table import Table
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from src.config import load_config, get_project_root
+from src.core.config import load_config, get_project_root
 
 console = Console()
 
@@ -259,6 +259,11 @@ def generate_sample_metrics() -> dict:
 
 def print_results(metrics: dict):
     """Pretty-print evaluation results."""
+    if metrics.get("is_fabricated_placeholder"):
+        console.print(
+            "\n[bold red]WARNING: these are HARDCODED PLACEHOLDER numbers "
+            "(generate_sample_metrics()), not a measured evaluation run.[/bold red]"
+        )
     console.print(f"\n[bold]Evaluation Results[/bold] ({metrics['n_samples']} samples)")
     console.print(f"Overall Accuracy: [bold green]{metrics['overall_accuracy']:.1%}[/bold green]")
     console.print(f"Fully Correct: {metrics['fully_correct']}/{metrics['n_samples']}\n")
@@ -298,23 +303,50 @@ def main():
     parser = argparse.ArgumentParser(description="Evaluate extraction accuracy")
     parser.add_argument("--predictions", type=str, help="Predictions JSONL path")
     parser.add_argument("--ground_truth", type=str, help="Ground truth JSONL path")
-    parser.add_argument("--output", type=str, default="results/metrics.json", help="Output metrics path")
-    parser.add_argument("--generate-sample-metrics", action="store_true",
-                        help="Generate sample metrics for README")
+    parser.add_argument(
+        "--output", type=str, default=None,
+        help="Output path (default: results/metrics.json for a real run, "
+             "results/metrics.fabricated_placeholder.json for --generate-sample-metrics)",
+    )
+    parser.add_argument(
+        "--generate-sample-metrics", action="store_true",
+        help=(
+            "Emit generate_sample_metrics()'s HARDCODED placeholder numbers "
+            "('target results from the project spec', per its docstring) -- "
+            "NOT a real evaluation run. Only use this to regenerate a "
+            "clearly-labeled placeholder; never to produce a number reported "
+            "as measured."
+        ),
+    )
     args = parser.parse_args()
 
     if args.generate_sample_metrics:
         metrics = generate_sample_metrics()
+        metrics["is_fabricated_placeholder"] = True
     elif args.predictions and args.ground_truth:
         metrics = evaluate_dataset(Path(args.predictions), Path(args.ground_truth))
+        metrics["is_fabricated_placeholder"] = False
     else:
-        console.print("[yellow]No predictions provided. Generating sample metrics.[/yellow]")
-        metrics = generate_sample_metrics()
+        # No silent fallback: this exact silent branch is how a hardcoded
+        # placeholder ends up quoted in the README as a measured result --
+        # printing it as though evaluate_dataset() ran is worse than refusing.
+        parser.error(
+            "Provide --predictions and --ground_truth for a real evaluation, "
+            "or pass --generate-sample-metrics explicitly if you want the "
+            "labeled placeholder numbers."
+        )
 
     print_results(metrics)
 
-    # Save metrics
-    output_path = Path(args.output)
+    # Save metrics. Default filename differs by fabrication status so a
+    # placeholder run can never land at the same path a real run would use --
+    # the same fix already applied to evaluation/benchmark.py's --simulate path.
+    default_output = (
+        "results/metrics.fabricated_placeholder.json"
+        if metrics["is_fabricated_placeholder"]
+        else "results/metrics.json"
+    )
+    output_path = Path(args.output or default_output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "w") as f:
         json.dump(metrics, f, indent=2)

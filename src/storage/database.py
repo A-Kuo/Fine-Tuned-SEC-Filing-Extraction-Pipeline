@@ -171,8 +171,16 @@ class PostgresStorage:
         latency_ms: float,
         model_version: str,
         raw_output: str = "",
+        text_hash: str | None = None,
     ) -> bool:
-        """Store extraction result. Uses UPSERT to handle re-extractions."""
+        """Store extraction result. Uses UPSERT to handle re-extractions.
+
+        text_hash populates the request_text_hash column -- present in the
+        schema since it was first written (db/migrations/0002_runtime_core.sql)
+        but never actually set by any code path until this. It's what lets
+        get_extraction_by_text_hash() find a prior result for a request that
+        arrives without a filing_id.
+        """
         if not self._available:
             return False
 
@@ -184,9 +192,9 @@ class PostgresStorage:
                     filing_id, company_name, filing_type, filing_date,
                     revenue, net_income, total_assets, total_liabilities, eps,
                     confidence_score, extraction_time_ms, model_version, raw_output,
-                    updated_at
+                    request_text_hash, updated_at
                 ) VALUES (
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW()
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW()
                 )
                 ON CONFLICT (filing_id) DO UPDATE SET
                     company_name = EXCLUDED.company_name,
@@ -201,6 +209,7 @@ class PostgresStorage:
                     extraction_time_ms = EXCLUDED.extraction_time_ms,
                     model_version = EXCLUDED.model_version,
                     raw_output = EXCLUDED.raw_output,
+                    request_text_hash = EXCLUDED.request_text_hash,
                     updated_at = NOW()
                 """,
                 (
@@ -217,12 +226,44 @@ class PostgresStorage:
                     int(latency_ms),
                     model_version,
                     raw_output,
+                    text_hash,
                 ),
             )
             return True
         except Exception as e:
             logger.error(f"PostgreSQL store error: {e}")
             return False
+
+    def get_extraction_by_text_hash(self, text_hash: str) -> dict | None:
+        """Idempotency fallback for requests with no filing_id: find a prior
+        result for the exact same input text. Most recent match wins if the
+        same text was somehow stored more than once."""
+        if not self._available:
+            return None
+
+        try:
+            cur = self._connection.cursor()
+            cur.execute(
+                """
+                SELECT filing_id, company_name, filing_type, filing_date,
+                       revenue, net_income, total_assets, total_liabilities, eps,
+                       confidence_score, extraction_time_ms, model_version
+                FROM extractions WHERE request_text_hash = %s
+                ORDER BY created_at DESC LIMIT 1
+                """,
+                (text_hash,),
+            )
+            row = cur.fetchone()
+            if row:
+                cols = [
+                    "filing_id", "company_name", "filing_type", "date",
+                    "revenue", "net_income", "total_assets", "total_liabilities", "eps",
+                    "confidence_score", "extraction_time_ms", "model_version",
+                ]
+                return {c: (str(v) if v is not None else None) for c, v in zip(cols, row)}
+        except Exception as e:
+            logger.error(f"PostgreSQL get-by-hash error: {e}")
+        return None
 
     def get_extraction(self, filing_id: str) -> dict | None:
         """Retrieve extraction by filing_id."""
@@ -391,33 +432,14 @@ class PostgresStorage:
         """Parse financial string to numeric value for SQL storage.
 
         Handles formats like '$383.3 billion', '$12.1 million', '$5.23'.
+        Delegates to src.extraction.numeric_normalize's shared implementation
+        -- this used to be a second, independent regex implementation that
+        could silently drift from src/extraction/normalizer.py's version.
         """
-        if not value:
-            return None
+        from src.extraction.numeric_normalize import parse_numeric_value
 
-        import re
-        # Remove $ and commas
-        cleaned = re.sub(r'[$,]', '', value.strip())
-
-        multipliers = {
-            "trillion": 1e12,
-            "billion": 1e9,
-            "million": 1e6,
-            "thousand": 1e3,
-        }
-
-        for unit, mult in multipliers.items():
-            if unit in cleaned.lower():
-                num_str = re.search(r'[\d.]+', cleaned)
-                if num_str:
-                    return float(num_str.group()) * mult
-                return None
-
-        # Plain number
-        num_str = re.search(r'[\d.]+', cleaned)
-        if num_str:
-            return float(num_str.group())
-        return None
+        result = parse_numeric_value(value)
+        return float(result) if result is not None else None
 
     def close(self):
         """Close database connection."""
@@ -723,14 +745,19 @@ class DatabaseManager:
         raw_output: str = "",
         status: str = "success",
         error: str | None = None,
+        text_hash: str | None = None,
     ) -> bool:
         """Store extraction result in both tiers.
 
         Write-through: PostgreSQL first (source of truth), then Redis.
+        text_hash (see PostgresStorage.store_extraction) also gets cached
+        under its own Redis key so get_extraction_by_text_hash() has a fast
+        path too, not just a Postgres fallback.
         """
         # Always persist to PostgreSQL
         pg_ok = self.storage.store_extraction(
-            filing_id, result, confidence, latency_ms, model_version, raw_output
+            filing_id, result, confidence, latency_ms, model_version, raw_output,
+            text_hash=text_hash,
         )
 
         # Always log the attempt
@@ -743,6 +770,8 @@ class DatabaseManager:
         cache_data["confidence_score"] = confidence
         cache_data["model_version"] = model_version
         self.cache.set(filing_id, cache_data)
+        if text_hash:
+            self.cache.set(f"hash:{text_hash}", cache_data)
 
         return pg_ok
 
@@ -762,6 +791,23 @@ class DatabaseManager:
         if result:
             # Warm the cache for next lookup
             self.cache.set(filing_id, result)
+        return result
+
+    def get_extraction_by_text_hash(self, text_hash: str) -> dict | None:
+        """Idempotency fallback for requests with no filing_id -- same
+        read-through pattern as get_extraction(), keyed by content hash
+        instead. RedisCache's key is filing_id-shaped but content-agnostic
+        (f"extraction:{key}"), so a "hash:..." key namespaces cleanly
+        alongside real filing_id keys without needing a second cache class.
+        """
+        cache_key = f"hash:{text_hash}"
+        cached = self.cache.get(cache_key)
+        if cached:
+            return cached
+
+        result = self.storage.get_extraction_by_text_hash(text_hash)
+        if result:
+            self.cache.set(cache_key, result)
         return result
 
     def store_metric(

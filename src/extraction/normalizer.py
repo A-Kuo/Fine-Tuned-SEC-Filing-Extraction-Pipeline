@@ -10,39 +10,7 @@ from src.core.schemas import (
     RiskFactorRecord,
     SectionRecord,
 )
-
-
-MULTIPLIERS = {
-    "thousand": 1_000,
-    "thousands": 1_000,
-    "million": 1_000_000,
-    "millions": 1_000_000,
-    "billion": 1_000_000_000,
-    "billions": 1_000_000_000,
-}
-
-
-def parse_numeric_value(raw: str | int | float | None) -> float | int | None:
-    if raw is None:
-        return None
-    if isinstance(raw, (int, float)):
-        return raw
-
-    text = raw.lower().replace("$", "").replace(",", "").strip()
-    multiplier = 1
-
-    for token, value in MULTIPLIERS.items():
-        if token in text:
-            multiplier = value
-            text = text.replace(token, "").strip()
-            break
-
-    match = re.search(r"-?\d+(\.\d+)?", text)
-    if not match:
-        return None
-
-    number = float(match.group(0)) * multiplier
-    return int(number) if number.is_integer() else number
+from src.extraction.numeric_normalize import MULTIPLIERS, parse_numeric_value  # noqa: F401 -- re-exported for existing callers
 
 
 def normalize_metric(

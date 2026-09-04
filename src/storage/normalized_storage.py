@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from loguru import logger
 
-from src.extraction.normalizer import filing_record_to_rows, resolve_metric_precedence
+from src.extraction.normalizer import filing_record_to_rows
 from src.core.schemas import FilingRecord, MetricRecord
 
 
@@ -92,43 +92,32 @@ class NormalizedStorage:
             logger.error(f"intel.filing_sections insert error: {e}")
             return False
 
-    def _get_existing_metric(
-        self, filing_id: str, metric_name: str, period: str, segment: str
-    ) -> MetricRecord | None:
-        cur = self._connection.cursor()
-        cur.execute(
-            """
-            SELECT metric_name, value, unit, period, segment, method, confidence,
-                   source_section, evidence_text, model_version
-            FROM intel.financial_metrics
-            WHERE filing_id = %s AND metric_name = %s AND period = %s AND segment = %s
-            """,
-            (filing_id, metric_name, period, segment),
-        )
-        row = cur.fetchone()
-        if row is None:
-            return None
-        return MetricRecord(
-            name=row[0], value=row[1], unit=row[2], period=row[3] or None,
-            segment=row[4] or None, method=row[5], confidence=row[6],
-            source_section=row[7], evidence_text=row[8], model_version=row[9],
-        )
-
     def upsert_metric(self, filing_id: str, incoming: MetricRecord) -> bool:
-        """Upsert a metric, respecting XBRL precedence.
+        """Upsert a metric, respecting XBRL precedence atomically.
 
-        Reads the current row (if any) for this natural key, resolves
-        precedence, then writes the winner. This guarantees an `llm`/`heuristic`
-        fact can never clobber an existing `xbrl` fact for the same metric.
+        The precedence rule (an xbrl fact is never overwritten by a
+        heuristic/llm fact for the same natural key -- see docs/BOUNDARY.md)
+        is enforced directly in the ON CONFLICT ... DO UPDATE's WHERE clause,
+        not via a prior SELECT. The previous version did
+        SELECT-existing -> resolve_metric_precedence() -> UPSERT-winner,
+        which raced: a write from another connection landing between this
+        connection's SELECT and its own INSERT/UPDATE could be silently
+        clobbered or could silently clobber this one, and two concurrent
+        callers for the same natural key could both read "no existing row"
+        and both proceed as if creating it fresh. A single statement has no
+        such window -- Postgres evaluates the WHERE clause against the
+        row as it exists at the moment of the write, atomically.
+
+        Mirrors the exact same clause used in db/sync/transfer_metrics.py's
+        standalone bulk-ingestion path, so both writers enforce the rule
+        identically rather than maintaining two implementations that could
+        drift apart.
         """
         if not self._available:
             return False
         try:
             period = incoming.period or ""
             segment = incoming.segment or ""
-            existing = self._get_existing_metric(filing_id, incoming.name, period, segment)
-            winner = resolve_metric_precedence(existing, incoming)
-
             cur = self._connection.cursor()
             cur.execute(
                 """
@@ -146,11 +135,15 @@ class NormalizedStorage:
                     evidence_text = EXCLUDED.evidence_text,
                     model_version = EXCLUDED.model_version,
                     updated_at = NOW()
+                WHERE NOT (
+                    intel.financial_metrics.method = 'xbrl'
+                    AND EXCLUDED.method <> 'xbrl'
+                )
                 """,
                 (
-                    filing_id, winner.name, period, segment, winner.value, winner.unit,
-                    winner.method, winner.confidence, winner.source_section,
-                    winner.evidence_text, winner.model_version,
+                    filing_id, incoming.name, period, segment, incoming.value, incoming.unit,
+                    incoming.method, incoming.confidence, incoming.source_section,
+                    incoming.evidence_text, incoming.model_version,
                 ),
             )
             return True

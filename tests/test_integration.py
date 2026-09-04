@@ -104,7 +104,11 @@ class TestEndToEndMonitoring:
     """Test: extraction results → monitoring → alert generation."""
 
     def test_healthy_extractions_no_alerts(self):
-        """94% accuracy + normal latency → healthy report."""
+        """Synthetic fixture (current == baseline, normal latency) exercising
+        generate_full_report()'s healthy branch. The 0.94 here is an arbitrary
+        test value, not a claim about real model accuracy -- see
+        evaluate.py::generate_sample_metrics() for that (separately flagged
+        fabricated-placeholder) number."""
         report = generate_full_report(
             current_accuracy=0.94,
             baseline_accuracy=0.94,
@@ -118,7 +122,8 @@ class TestEndToEndMonitoring:
         assert "healthy" in report_json
 
     def test_degraded_accuracy_triggers_alert(self):
-        """Accuracy drop → monitoring catches it → alert generated."""
+        """Synthetic fixture (large accuracy drop) exercising the critical
+        branch -- arbitrary test values, not real measurements."""
         report = generate_full_report(
             current_accuracy=0.85,
             baseline_accuracy=0.94,

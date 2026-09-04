@@ -24,6 +24,8 @@ from typing import Optional, TYPE_CHECKING
 
 from loguru import logger
 
+from src.core.config import load_config
+
 if TYPE_CHECKING:
     from src.extraction.model import FinancialLLM
 
@@ -80,14 +82,24 @@ class ExtractionEngine:
     changing the extraction logic.
     """
 
-    def __init__(self, model: FinancialLLM | None = None):
+    def __init__(self, model: FinancialLLM | None = None, confidence_scoring: str | None = None):
         """Initialize with a loaded model.
 
         Args:
             model: Pre-loaded FinancialLLM. If None, loads from config.
+            confidence_scoring: "heuristic" (default) or "logprob". Reads
+                config.yaml's extraction.confidence_scoring if not given
+                explicitly. "logprob" is a scaffold, not a working
+                implementation -- see _estimate_confidence_from_logprobs().
         """
         self.model = model
         self._initialized = model is not None
+        if confidence_scoring is None:
+            try:
+                confidence_scoring = load_config().get("extraction", {}).get("confidence_scoring", "heuristic")
+            except Exception:
+                confidence_scoring = "heuristic"
+        self._confidence_scoring = confidence_scoring
 
     def initialize(self) -> None:
         """Lazy-load model on first use."""
@@ -296,11 +308,28 @@ class ExtractionEngine:
         self,
         extraction: ExtractionResult | None,
         errors: list[str],
+        raw_output: str | None = None,
+        generation_scores: "list | None" = None,
     ) -> float:
         """Estimate confidence score for an extraction.
 
-        Heuristic confidence based on field completeness and validation.
-        In production, you'd use generation logprobs for per-field confidence.
+        Dispatches on config.yaml's extraction.confidence_scoring
+        ("heuristic", the default, or "logprob"). raw_output/generation_scores
+        are only used by the logprob path -- existing callers that don't pass
+        them keep getting heuristic scoring unchanged.
+        """
+        if self._confidence_scoring == "logprob":
+            return self._estimate_confidence_from_logprobs(
+                extraction, errors, raw_output, generation_scores
+            )
+        return self._estimate_confidence_heuristic(extraction, errors)
+
+    def _estimate_confidence_heuristic(
+        self,
+        extraction: ExtractionResult | None,
+        errors: list[str],
+    ) -> float:
+        """Heuristic confidence based on field completeness and validation.
 
         Score breakdown:
             - 0.0-0.3: Parse failure or critical errors
@@ -329,3 +358,38 @@ class ExtractionEngine:
         score -= len(errors) * 0.1
 
         return max(0.0, min(1.0, score))
+
+    def _estimate_confidence_from_logprobs(
+        self,
+        extraction: ExtractionResult | None,
+        errors: list[str],
+        raw_output: str | None,
+        generation_scores: "list | None",
+    ) -> float:
+        """SCAFFOLD, not a working implementation -- see config.yaml's
+        extraction.confidence_scoring docstring for how to enable this path,
+        and don't: it raises rather than silently returning a plausible-
+        looking but unverified number.
+
+        The intended design: average per-token probability (from
+        FinancialLLM.generate()'s output_scores, if the caller requests
+        return_dict_in_generate=True/output_scores=True) over the token span
+        of each field's generated JSON value, giving a real per-field
+        confidence instead of the heuristic's fixed per-field bonus. This
+        needs three things this environment cannot provide to build safely:
+        (1) a real GPU to run generation and inspect actual score tensors,
+        (2) verifying the tokenizer offset-mapping between raw_output's
+        string positions and generation_scores' token positions actually
+        lines up for this model/tokenizer, and (3) FinancialLLM.generate()
+        currently returns only (text, latency_ms) -- it would need extending
+        to optionally return scores too, itself untestable without a GPU.
+        Writing a plausible-looking implementation without being able to run
+        it against a real model would be exactly the kind of unverified
+        number this repo's truth audit (docs/TRUTH_AUDIT.md) exists to catch.
+        """
+        raise NotImplementedError(
+            "logprob confidence scoring is a documented scaffold, not "
+            "implemented -- see this method's docstring. Set "
+            "extraction.confidence_scoring back to 'heuristic' in "
+            "config.yaml, or implement and verify this on a GPU."
+        )

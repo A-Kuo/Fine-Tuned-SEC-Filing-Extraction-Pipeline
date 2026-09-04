@@ -59,37 +59,52 @@ class TestUpsertFiling:
 
 
 class TestUpsertMetricPrecedence:
-    def test_no_existing_row_inserts_incoming_as_is(self):
+    """upsert_metric() enforces xbrl precedence atomically in the SQL
+    statement's WHERE clause (see the docstring on upsert_metric for why the
+    previous SELECT-then-resolve-then-write approach was a race). There is no
+    longer a SELECT call at all -- Postgres decides at write time whether the
+    incoming row actually replaces what's there, so these tests assert (a)
+    exactly one statement is executed, (b) the incoming values are always
+    what's bound (never a Python-resolved "winner"), and (c) the statement
+    text itself contains the precedence guard.
+    """
+
+    def test_executes_exactly_one_statement_no_prior_select(self):
         storage = _make_storage()
         mock_cursor = MagicMock()
-        mock_cursor.fetchone = MagicMock(return_value=None)
         storage._connection.cursor = MagicMock(return_value=mock_cursor)
 
         incoming = MetricRecord(name="revenue", value=1.0, method="llm", confidence=0.5)
         assert storage.upsert_metric("f-1", incoming) is True
+        mock_cursor.execute.assert_called_once()
 
-        # Second execute call is the INSERT ... ON CONFLICT; check the method written.
-        insert_call = mock_cursor.execute.call_args_list[-1]
-        params = insert_call[0][1]
+    def test_incoming_values_are_always_bound_as_is(self):
+        """Precedence is enforced server-side now -- the incoming llm values
+        are passed unconditionally regardless of what (if anything) exists;
+        Postgres's WHERE clause decides whether the write actually lands."""
+        storage = _make_storage()
+        mock_cursor = MagicMock()
+        storage._connection.cursor = MagicMock(return_value=mock_cursor)
+
+        incoming = MetricRecord(name="revenue", value=1.0, method="llm", confidence=0.5)
+        storage.upsert_metric("f-1", incoming)
+
+        sql, params = mock_cursor.execute.call_args[0]
         assert "llm" in params
+        assert 1.0 in params
 
-    def test_existing_xbrl_row_blocks_llm_overwrite(self):
+    def test_statement_contains_xbrl_precedence_guard(self):
         storage = _make_storage()
         mock_cursor = MagicMock()
-        # _get_existing_metric SELECT returns an existing xbrl row.
-        mock_cursor.fetchone = MagicMock(return_value=(
-            "revenue", 500.0, "usd", "", "", "xbrl", 0.99, "xbrl_source", "ev", None,
-        ))
         storage._connection.cursor = MagicMock(return_value=mock_cursor)
 
         incoming = MetricRecord(name="revenue", value=1.0, method="llm", confidence=0.5)
-        assert storage.upsert_metric("f-1", incoming) is True
+        storage.upsert_metric("f-1", incoming)
 
-        insert_call = mock_cursor.execute.call_args_list[-1]
-        params = insert_call[0][1]
-        # The xbrl value/method should have been written back, not the llm incoming one.
-        assert "xbrl" in params
-        assert 500.0 in params
+        sql, _ = mock_cursor.execute.call_args[0]
+        assert "ON CONFLICT" in sql
+        assert "method = 'xbrl'" in sql
+        assert "EXCLUDED.method <> 'xbrl'" in sql
 
 
 class TestInsertRiskFactor:
@@ -110,7 +125,6 @@ class TestSaveFilingRecord:
     def test_writes_all_tables(self):
         storage = _make_storage()
         mock_cursor = MagicMock()
-        mock_cursor.fetchone = MagicMock(return_value=None)
         storage._connection.cursor = MagicMock(return_value=mock_cursor)
 
         record = FilingRecord(
@@ -126,8 +140,9 @@ class TestSaveFilingRecord:
         )
 
         assert storage.save_filing_record(record) is True
-        # filing + section + metric(select+insert) + risk + mdna
-        assert mock_cursor.execute.call_count >= 5
+        # filing + section + metric + risk + mdna -- one statement each,
+        # since upsert_metric no longer issues a prior SELECT.
+        assert mock_cursor.execute.call_count == 5
 
 
 if __name__ == "__main__":

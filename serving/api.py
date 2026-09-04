@@ -205,6 +205,14 @@ class AppState:
         self.db: DatabaseManager | None = None
         self.circuit_ticker: CircuitBreaker = CircuitBreaker("ticker-agent")
         self.circuit_viz: CircuitBreaker = CircuitBreaker("viz-framework")
+        # Guards against two concurrent requests for the same uncached
+        # filing_id/text both reaching the model: without a filing_id, every
+        # request used to always fall through to full extraction (no
+        # idempotency key at all to check a cache against), and even WITH a
+        # filing_id, two requests arriving before either one's result was
+        # persisted would both proceed. Keyed by filing_id or text_hash (see
+        # _idempotency_key()).
+        self.inflight_locks: dict[str, asyncio.Lock] = {}
 
 
 state = AppState()
@@ -240,16 +248,23 @@ async def lifespan(app: FastAPI):
         logger.warning(f"Database not available: {e}")
         state.db = None
 
-    vllm_url = f"http://{config['serving']['host']}:{config['serving']['port']}"
-    try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(f"{vllm_url}/health", timeout=5)
-            if resp.status_code == 200:
-                state.vllm_url = vllm_url
-                state.vllm_client = httpx.AsyncClient(timeout=60)
-                logger.info(f"Connected to vLLM backend: {vllm_url}")
-    except Exception:
-        logger.info("No vLLM backend found, using local model")
+    # This used to default to f"http://{config['serving']['host']}:{config['serving']['port']}"
+    # -- the SAME host:port this app itself binds to via uvicorn.run() below.
+    # Pinging your own not-yet-listening address during your own startup
+    # always fails, which permanently disabled this code path. vllm_url must
+    # now be configured explicitly (config.yaml's serving.vllm_url) to point
+    # at an actually-separate vLLM process.
+    vllm_url = config["serving"].get("vllm_url") or None
+    if vllm_url:
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(f"{vllm_url}/health", timeout=5)
+                if resp.status_code == 200:
+                    state.vllm_url = vllm_url
+                    state.vllm_client = httpx.AsyncClient(timeout=60)
+                    logger.info(f"Connected to vLLM backend: {vllm_url}")
+        except Exception:
+            logger.info(f"Configured vLLM backend ({vllm_url}) unreachable, using local model")
 
     if not state.vllm_url:
         state.engine = ExtractionEngine()
@@ -355,62 +370,111 @@ def create_app(config: dict | None = None) -> FastAPI:
 # ─── Endpoints ───────────────────────────────────────────────────────────────
 
 
-async def run_extraction(req: ExtractRequest, background_tasks: BackgroundTasks) -> ExtractResponseModel:
-    # Cache-first: if filing_id is known and result exists, skip model entirely.
-    # This satisfies the requirement to avoid re-processing the same filing twice.
-    if req.filing_id and state.db:
+def _text_hash(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _lookup_cached(req: ExtractRequest, text_hash: str) -> ExtractResponseModel | None:
+    """filing_id is the primary idempotency key when given; text_hash is the
+    fallback for requests with no filing_id at all -- previously there was
+    no idempotency key whatsoever in that case, so every such request always
+    ran full extraction even for text already processed."""
+    if not state.db:
+        return None
+
+    cached = None
+    if req.filing_id:
         cached = state.db.get_extraction(req.filing_id)
-        if cached:
-            logger.info(f"Cache hit — returning stored result for filing_id={req.filing_id!r}")
-            return ExtractResponseModel(
-                status="success",
-                filing_id=cached.get("filing_id") or req.filing_id,
-                company_name=cached.get("company_name"),
-                ticker=cached.get("ticker"),
-                filing_type=cached.get("filing_type"),
-                date=cached.get("date"),
-                fiscal_year_end=cached.get("fiscal_year_end"),
-                revenue=cached.get("revenue"),
-                net_income=cached.get("net_income"),
-                total_assets=cached.get("total_assets"),
-                total_liabilities=cached.get("total_liabilities"),
-                eps=cached.get("eps"),
-                sector=cached.get("sector"),
-                confidence_score=float(cached.get("confidence_score") or 0.0),
-                latency_ms=0.0,
-                model_version=cached.get("model_version") or "cached",
-                cache_hit=True,
-            )
+    if not cached:
+        cached = state.db.get_extraction_by_text_hash(text_hash)
+    if not cached:
+        return None
 
-    start = time.time()
+    return ExtractResponseModel(
+        status="success",
+        filing_id=cached.get("filing_id") or req.filing_id,
+        company_name=cached.get("company_name"),
+        ticker=cached.get("ticker"),
+        filing_type=cached.get("filing_type"),
+        date=cached.get("date"),
+        fiscal_year_end=cached.get("fiscal_year_end"),
+        revenue=cached.get("revenue"),
+        net_income=cached.get("net_income"),
+        total_assets=cached.get("total_assets"),
+        total_liabilities=cached.get("total_liabilities"),
+        eps=cached.get("eps"),
+        sector=cached.get("sector"),
+        confidence_score=float(cached.get("confidence_score") or 0.0),
+        latency_ms=0.0,
+        model_version=cached.get("model_version") or "cached",
+        cache_hit=True,
+    )
+
+
+async def run_extraction(req: ExtractRequest, background_tasks: BackgroundTasks) -> ExtractResponseModel:
+    text_hash = _text_hash(req.text)
+
+    cached_response = _lookup_cached(req, text_hash)
+    if cached_response:
+        logger.info(f"Cache hit — returning stored result for filing_id={req.filing_id!r}")
+        return cached_response
+
+    # In-flight dedup: two concurrent requests for the same uncached
+    # filing_id/text must not both reach the model. The lock is keyed by
+    # filing_id when given (matches the primary cache key above), else by
+    # text_hash.
+    idempotency_key = req.filing_id or text_hash
+    lock = state.inflight_locks.setdefault(idempotency_key, asyncio.Lock())
+
     try:
-        if state.vllm_url and state.vllm_client:
-            response = await _extract_via_vllm(req)
-        elif state.engine:
-            response = _extract_local(req)
-        else:
-            raise HTTPException(503, "No model backend available")
+        async with lock:
+            # Re-check now that we hold the lock: whoever held it before us
+            # may have just finished and persisted the exact result we're
+            # after.
+            cached_response = _lookup_cached(req, text_hash)
+            if cached_response:
+                logger.info(f"Cache hit after waiting on in-flight lock for {idempotency_key!r}")
+                return cached_response
 
-        latency = (time.time() - start) * 1000
-        state.latencies.append(latency)
-        state.success_count += 1
-        EXTRACTION_DURATION.observe(latency / 1000.0)
-        ft = response.result.filing_type if response.result else "unknown"
-        EXTRACTION_TOTAL.labels(status=response.status, filing_type=ft or "unknown").inc()
+            start = time.time()
+            try:
+                if state.vllm_url and state.vllm_client:
+                    response = await _extract_via_vllm(req)
+                elif state.engine:
+                    response = _extract_local(req)
+                else:
+                    raise HTTPException(503, "No model backend available")
 
-        model = _to_response_model(response)
-        model.ab_variant = _maybe_record_ab(req, response, latency)
-        _maybe_persist(req, response, latency)
-        background_tasks.add_task(_dispatch_webhooks_background, model)
-        return model
+                latency = (time.time() - start) * 1000
+                state.latencies.append(latency)
+                state.success_count += 1
+                EXTRACTION_DURATION.observe(latency / 1000.0)
+                ft = response.result.filing_type if response.result else "unknown"
+                EXTRACTION_TOTAL.labels(status=response.status, filing_type=ft or "unknown").inc()
 
-    except HTTPException:
-        raise
-    except Exception as e:
-        state.error_count += 1
-        EXTRACTION_TOTAL.labels(status="error", filing_type="unknown").inc()
-        logger.error(f"Extraction failed: {e}")
-        raise HTTPException(500, f"Extraction failed: {str(e)}")
+                model = _to_response_model(response)
+                model.ab_variant = _maybe_record_ab(req, response, latency)
+                _maybe_persist(req, response, latency, text_hash)
+                background_tasks.add_task(_dispatch_webhooks_background, model)
+                return model
+
+            except HTTPException:
+                raise
+            except Exception as e:
+                state.error_count += 1
+                EXTRACTION_TOTAL.labels(status="error", filing_type="unknown").inc()
+                logger.error(f"Extraction failed: {e}")
+                raise HTTPException(500, f"Extraction failed: {str(e)}")
+    finally:
+        # Runs strictly after `async with lock` has released it (this finally
+        # is OUTSIDE that block) -- checking .locked() from inside would
+        # always see it as still held and never clean up. Drop the entry
+        # once nobody's waiting on it, so inflight_locks doesn't grow forever
+        # across the server's lifetime. A coroutine that already looked this
+        # Lock object up before it's deleted still holds a valid reference
+        # and works correctly either way.
+        if idempotency_key in state.inflight_locks and not state.inflight_locks[idempotency_key].locked():
+            del state.inflight_locks[idempotency_key]
 
 
 async def health_check() -> HealthResponse:
@@ -594,7 +658,9 @@ def _maybe_record_ab(req: ExtractRequest, response: ExtractionResponse, latency_
     return ab.model_version_label
 
 
-def _maybe_persist(req: ExtractRequest, response: ExtractionResponse, latency_ms: float) -> None:
+def _maybe_persist(
+    req: ExtractRequest, response: ExtractionResponse, latency_ms: float, text_hash: str | None = None,
+) -> None:
     if not state.db or not response.result:
         return
     try:
@@ -607,6 +673,7 @@ def _maybe_persist(req: ExtractRequest, response: ExtractionResponse, latency_ms
             response.raw_output,
             status=response.status,
             error=response.error,
+            text_hash=text_hash,
         )
         state.db.upsert_pipeline_stage(
             req.filing_id or response.result.filing_id or "unknown",

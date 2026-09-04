@@ -13,7 +13,7 @@ import streamlit as st
 from streamlit_autorefresh import st_autorefresh
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from src.config import load_config
+from src.core.config import load_config
 
 
 def generate_demo_data():
@@ -49,7 +49,13 @@ def generate_demo_data():
 @st.cache_data(ttl=300)
 
 def _load_dashboard_data_cached(days: int):
-    """Load time series and logs from PostgreSQL via DatabaseManager."""
+    """Load time series and logs from PostgreSQL via DatabaseManager.
+
+    Returns a 5-tuple ending in data_source ("live" or "demo") -- previously
+    this silently returned generate_demo_data()'s fake numbers on ANY
+    exception (DB down, empty tables, whatever) with no way for the caller
+    to tell it wasn't real. See docs/TRUTH_AUDIT.md.
+    """
     try:
         from src.storage.database import DatabaseManager
 
@@ -77,9 +83,10 @@ def _load_dashboard_data_cached(days: int):
         if not cache_stats.get("available"):
             cache_stats = {"hit_rate": 0, "hits": 0, "misses": 0, "used_memory_mb": 0}
         db.close()
-        return accuracy_history, latencies, statuses, cache_stats
+        return accuracy_history, latencies, statuses, cache_stats, "live"
     except Exception:
-        return generate_demo_data()
+        accuracy_history, latencies, statuses, cache_stats = generate_demo_data()
+        return accuracy_history, latencies, statuses, cache_stats, "demo"
 
 
 def load_dashboard_data(days: int = 30):
@@ -185,7 +192,15 @@ def main():
 
     config = load_config()
     days = st.sidebar.selectbox("Time range (days)", [7, 14, 30], index=2)
-    accuracy_history, latencies, statuses, cache_stats = load_dashboard_data(days=days)
+    accuracy_history, latencies, statuses, cache_stats, data_source = load_dashboard_data(days=days)
+
+    if data_source == "demo":
+        st.warning(
+            "⚠️ DEMO DATA — PostgreSQL is unavailable or empty. Every number "
+            "on this page is generated (random.seed(42)), not measured. See "
+            "docs/TRUTH_AUDIT.md.",
+            icon="⚠️",
+        )
 
     col1, col2, col3, col4 = st.columns(4)
 
@@ -195,9 +210,14 @@ def main():
     else:
         current_acc = prev_acc = 0.94
 
+    # "Accuracy (approx)" is actually success/total status ratio (did
+    # extraction not error), not correctness against ground truth -- labeled
+    # honestly rather than implying it's model accuracy.
+    accuracy_label = "Extraction Success Rate (not model accuracy)"
+
     with col1:
         st.metric(
-            "Accuracy (approx)",
+            accuracy_label,
             f"{current_acc:.1%}",
             delta=f"{current_acc - prev_acc:.1%}" if len(accuracy_history) > 1 else None,
         )

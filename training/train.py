@@ -63,6 +63,7 @@ from trl import SFTConfig, SFTTrainer
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from src.core.config import load_config, get_project_root
 from src.core.chat_template import ensure_chat_template
+from src.core.dict_utils import deep_merge
 from training.callbacks import MetricsCallback, EarlyStoppingOnLoss
 from training.data_collator import FinancialDataCollator
 
@@ -421,6 +422,7 @@ def train(
     batch_size: int | None = None,
     learning_rate: float | None = None,
     max_samples: int | None = None,
+    config_overrides: dict | None = None,
 ):
     """Main training function.
 
@@ -432,8 +434,17 @@ def train(
     5. Load + format dataset
     6. Train with SFTTrainer
     7. Save adapter weights (~200MB)
+
+    config_overrides: a nested dict merged into the loaded config before the
+    scalar CLI-style args below are applied (so those still win if both are
+    given). Lets training/ablation_config.py drive e.g. lora.r or
+    lora.target_modules without a separate config.yaml per run -- see
+    scripts/kaggle_kernel/run_ablation_sweep.py.
     """
     config = load_config()
+
+    if config_overrides:
+        deep_merge(config, config_overrides)
 
     # Override config with CLI args
     if num_epochs:

@@ -1,0 +1,13 @@
+{
+  "dataset_version": "v1-benchmark_real-benchmark_splits-20260903T003942Z-aae43fea",
+  "schema_version": 1,
+  "source_split": "benchmark_real",
+  "template_family": "benchmark_splits",
+  "checksum": "aae43fea39ce5b7e57cf1929359c876f79984352588c86c8d774b2d7c55e65d2",
+  "record_count": 3,
+  "quarantined_count": 0,
+  "created_at": "2026-09-03T00:39:42.772235+00:00",
+  "lineage": {
+    "builder": "evaluation/benchmark_splits.py"
+  }
+}

@@ -38,7 +38,7 @@ from typing import Optional
 from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from src.config import load_config
+from src.core.config import load_config
 
 
 @dataclass
@@ -87,10 +87,12 @@ class MonitoringReport:
     alerts: list[str]
     status: str  # 'healthy', 'warning', 'critical'
     generated_at: str = ""
+    is_demo_data: bool = False
 
     def to_dict(self) -> dict:
         return {
             "status": self.status,
+            "is_demo_data": self.is_demo_data,
             "alerts": self.alerts,
             "drift": [d.to_dict() for d in self.drift_reports],
             "latency": {
@@ -144,31 +146,37 @@ def proportion_z_test(
     return z, p_value
 
 
-def check_accuracy_drift(
-    current_accuracy: float,
-    baseline_accuracy: float,
+def check_metric_drift(
+    metric_name: str,
+    current_value: float,
+    baseline_value: float,
     threshold: float,
     n_current: int = 50,
     n_baseline: int = 500,
 ) -> DriftReport:
-    """Check if model accuracy has drifted below threshold.
+    """Generic proportion-drift check: is `current_value` a statistically
+    significant, threshold-crossing drop from `baseline_value`?
 
-    Uses both absolute threshold check and statistical test:
-    - Absolute: is current_accuracy < threshold?
+    Works for any metric expressed as a proportion in [0, 1] -- accuracy,
+    schema-conformance rate, parser direct-parse rate (a drop here means
+    MORE outputs are needing fallback recovery), cache hit rate. Field
+    accuracy is really N per-field proportions; call this once per field.
+
+    Uses both an absolute threshold check and a statistical test:
+    - Absolute: is current_value < threshold?
     - Statistical: is the drop statistically significant (p < 0.05)?
-
     Both must trigger for a drift alert (reduces false positives).
     """
     z_score, p_value = proportion_z_test(
-        current_accuracy, baseline_accuracy, n_current, n_baseline
+        current_value, baseline_value, n_current, n_baseline
     )
 
-    is_drifted = current_accuracy < threshold and p_value < 0.05
+    is_drifted = current_value < threshold and p_value < 0.05
 
     return DriftReport(
-        metric_name="accuracy",
-        current_value=current_accuracy,
-        baseline_value=baseline_accuracy,
+        metric_name=metric_name,
+        current_value=current_value,
+        baseline_value=baseline_value,
         threshold=threshold,
         is_drifted=is_drifted,
         z_score=z_score,
@@ -176,6 +184,64 @@ def check_accuracy_drift(
         sample_size=n_current,
         checked_at=datetime.now(timezone.utc).isoformat(),
     )
+
+
+def check_accuracy_drift(
+    current_accuracy: float,
+    baseline_accuracy: float,
+    threshold: float,
+    n_current: int = 50,
+    n_baseline: int = 500,
+) -> DriftReport:
+    """Accuracy-specific wrapper around check_metric_drift(), kept for
+    backward compatibility with existing callers (generate_full_report(),
+    the CLI, tests)."""
+    return check_metric_drift(
+        "accuracy", current_accuracy, baseline_accuracy, threshold, n_current, n_baseline
+    )
+
+
+def check_parser_fallback_drift(
+    current_fallback_rate: float, baseline_fallback_rate: float,
+    threshold: float, n_current: int = 50, n_baseline: int = 500,
+) -> DriftReport:
+    """Parser fallback rate RISING is bad (more model outputs needed
+    rescue) -- the opposite direction from the other checks here, which all
+    flag when a metric DROPS. Implemented as a drop-check on 1 minus the
+    rate, so is_drifted still means "something got worse."
+    """
+    report = check_metric_drift(
+        "parser_fallback_rate_inverse",
+        1 - current_fallback_rate, 1 - baseline_fallback_rate,
+        1 - threshold, n_current, n_baseline,
+    )
+    # Re-express in the caller's terms (the rate itself, not its inverse).
+    report.metric_name = "parser_fallback_rate"
+    report.current_value = current_fallback_rate
+    report.baseline_value = baseline_fallback_rate
+    report.threshold = threshold
+    return report
+
+
+def check_schema_conformance_drift(
+    current_rate: float, baseline_rate: float,
+    threshold: float, n_current: int = 50, n_baseline: int = 500,
+) -> DriftReport:
+    return check_metric_drift("schema_conformance_rate", current_rate, baseline_rate, threshold, n_current, n_baseline)
+
+
+def check_field_accuracy_drift(
+    field_name: str, current_accuracy: float, baseline_accuracy: float,
+    threshold: float, n_current: int = 50, n_baseline: int = 500,
+) -> DriftReport:
+    return check_metric_drift(f"field_accuracy:{field_name}", current_accuracy, baseline_accuracy, threshold, n_current, n_baseline)
+
+
+def check_cache_performance_drift(
+    current_hit_rate: float, baseline_hit_rate: float,
+    threshold: float, n_current: int = 50, n_baseline: int = 500,
+) -> DriftReport:
+    return check_metric_drift("cache_hit_rate", current_hit_rate, baseline_hit_rate, threshold, n_current, n_baseline)
 
 
 def check_latency_sla(
@@ -215,6 +281,7 @@ def generate_full_report(
     baseline_accuracy: float,
     latencies_ms: list[float],
     config: dict | None = None,
+    is_demo_data: bool = False,
 ) -> MonitoringReport:
     """Generate complete monitoring report with alerts.
 
@@ -279,41 +346,85 @@ def generate_full_report(
         alerts=alerts,
         status=status,
         generated_at=datetime.now(timezone.utc).isoformat(),
+        is_demo_data=is_demo_data,
     )
 
 
 def main():
-    """CLI entry point for monitoring checks."""
+    """CLI entry point for monitoring checks.
+
+    No silent fabrication: this used to unconditionally default
+    --current-accuracy/--baseline-accuracy to 0.94 and always generate
+    latencies via random.gauss(seed=42), regardless of any flag, then
+    persist that as results/latest_report.json -- indistinguishable from a
+    report built from real production data. --demo is now required to get
+    that behavior at all, and its output is tagged and separately named.
+    """
     import argparse
 
     parser = argparse.ArgumentParser(description="Run monitoring checks")
     parser.add_argument("--check-drift", action="store_true", help="Check accuracy drift")
     parser.add_argument("--check-latency", action="store_true", help="Check latency SLA")
     parser.add_argument("--full-report", action="store_true", help="Generate full report")
-    parser.add_argument("--current-accuracy", type=float, default=0.94)
-    parser.add_argument("--baseline-accuracy", type=float, default=0.94)
+    parser.add_argument("--current-accuracy", type=float, default=None)
+    parser.add_argument("--baseline-accuracy", type=float, default=None)
+    parser.add_argument(
+        "--latencies-file", type=str, default=None,
+        help="JSON file containing a list of real per-request latencies (ms)",
+    )
+    parser.add_argument(
+        "--demo", action="store_true",
+        help="Use FABRICATED accuracy/latency numbers (not measured) -- only "
+             "for exercising this script's report format without production data",
+    )
     parser.add_argument("--output", type=str, default=None, help="Save report to file")
     args = parser.parse_args()
 
     config = load_config()
 
-    # Simulate latencies for demo (in production, pull from DB)
-    import random
-    random.seed(42)
-    sample_latencies = [random.gauss(350, 80) for _ in range(100)]
+    if args.demo:
+        current_accuracy = args.current_accuracy if args.current_accuracy is not None else 0.94
+        baseline_accuracy = args.baseline_accuracy if args.baseline_accuracy is not None else 0.94
+        import random
+        random.seed(42)
+        latencies = [random.gauss(350, 80) for _ in range(100)]
+    else:
+        if args.current_accuracy is None or args.baseline_accuracy is None:
+            parser.error(
+                "--current-accuracy and --baseline-accuracy are required "
+                "(measured values), or pass --demo for fabricated numbers."
+            )
+        current_accuracy = args.current_accuracy
+        baseline_accuracy = args.baseline_accuracy
+        if args.latencies_file:
+            with open(args.latencies_file) as f:
+                latencies = json.load(f)
+        elif args.check_latency or args.full_report or (not args.check_drift and not args.check_latency):
+            parser.error(
+                "--latencies-file is required for latency checks "
+                "(a JSON list of real per-request latencies in ms), or pass --demo."
+            )
+        else:
+            latencies = []
 
     if args.full_report or (not args.check_drift and not args.check_latency):
         report = generate_full_report(
-            current_accuracy=args.current_accuracy,
-            baseline_accuracy=args.baseline_accuracy,
-            latencies_ms=sample_latencies,
+            current_accuracy=current_accuracy,
+            baseline_accuracy=baseline_accuracy,
+            latencies_ms=latencies,
             config=config,
+            is_demo_data=args.demo,
         )
         report_dict = report.to_dict()
+        if args.demo:
+            print("WARNING: --demo was passed -- this report is FABRICATED, not measured.")
         print(json.dumps(report_dict, indent=2))
 
-        # Always persist the latest report for dashboard consumption
-        default_report_path = Path("results/latest_report.json")
+        # Persist for dashboard consumption -- demo and real reports write to
+        # distinctly named files so a demo run can never silently become
+        # "the latest report" a live dashboard reads as production data.
+        default_name = "latest_report.demo.json" if args.demo else "latest_report.json"
+        default_report_path = Path("results") / default_name
         default_report_path.parent.mkdir(parents=True, exist_ok=True)
         with open(default_report_path, "w") as f:
             json.dump(report_dict, f, indent=2)
@@ -325,14 +436,14 @@ def main():
 
     if args.check_drift:
         drift = check_accuracy_drift(
-            args.current_accuracy, args.baseline_accuracy,
+            current_accuracy, baseline_accuracy,
             config["monitoring"]["accuracy_threshold"],
         )
         print(json.dumps(drift.to_dict(), indent=2))
 
     if args.check_latency:
         latency = check_latency_sla(
-            sample_latencies,
+            latencies,
             config["monitoring"]["latency_p99_threshold_ms"],
         )
         print(f"p50: {latency.p50_ms:.0f}ms  p95: {latency.p95_ms:.0f}ms  "

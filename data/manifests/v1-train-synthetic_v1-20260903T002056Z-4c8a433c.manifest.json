@@ -1,0 +1,13 @@
+{
+  "dataset_version": "v1-train-synthetic_v1-20260903T002056Z-4c8a433c",
+  "schema_version": 1,
+  "source_split": "train",
+  "template_family": "synthetic_v1",
+  "checksum": "4c8a433c8b7edbc693da0dce07c1a09e439fcd06916c260003ac5772741286ab",
+  "record_count": 90,
+  "quarantined_count": 0,
+  "created_at": "2026-09-03T00:20:56.534868+00:00",
+  "lineage": {
+    "source_file": "data\\sec_filings_train.jsonl"
+  }
+}
