@@ -20,18 +20,35 @@ class NormalizedStorage:
     """PostgreSQL persistence for FilingRecord data (intel schema)."""
 
     def __init__(self, host: str, port: int, user: str, password: str, database: str):
-        self._dsn = f"postgresql://{user}:{password}@{host}:{port}/{database}"
+        self._host = host
+        self._port = port
+        self._user = user
+        self._password = password
+        self._database = database
         self._connection = None
         self._available = False
 
     def connect(self) -> bool:
-        """Establish PostgreSQL connection."""
+        """Establish PostgreSQL connection.
+
+        Uses discrete keyword arguments rather than a postgresql:// URI --
+        a URI built by string interpolation breaks for any password
+        containing URI-reserved characters (%, ?, /, @, etc.), which a
+        raw f-string DSN doesn't escape. Mirrors db/sync/transfer_metrics.py's
+        connect(), which never hit this because it always used keyword args.
+        """
         try:
             import psycopg2
-            self._connection = psycopg2.connect(self._dsn)
+            self._connection = psycopg2.connect(
+                host=self._host,
+                port=self._port,
+                user=self._user,
+                password=self._password,
+                dbname=self._database,
+            )
             self._connection.autocommit = True
             self._available = True
-            logger.info(f"NormalizedStorage connected: {self._dsn.split('@')[1]}")
+            logger.info(f"NormalizedStorage connected: {self._host}:{self._port}/{self._database}")
             return True
         except Exception as e:
             logger.warning(f"NormalizedStorage unavailable: {e}. Records will not be persisted.")
