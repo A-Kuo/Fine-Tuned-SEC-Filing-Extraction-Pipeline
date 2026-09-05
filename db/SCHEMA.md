@@ -1,9 +1,9 @@
 # Database Schema Reference
 
-Two schemas coexist, representing two architectures for the same domain — see `docs/BOUNDARY.md` for the extraction-scope boundary and `docs/TRUTH_AUDIT.md` for the current status of each.
+Two schemas coexist, representing two architectures for the same domain — see [`docs/BOUNDARY.md`](../docs/BOUNDARY.md) for the extraction-scope boundary and the [README's Limitations section](../README.md#limitations) for the current status of each.
 
 - **`public.*`** — flat, one row per filing (architecture A). This is what `src/storage/database.py`'s `DatabaseManager`/`PostgresStorage` actually writes to, and what `serving/api.py` and `monitoring/dashboard.py` read. **Live in production.**
-- **`intel.*`** — normalized, one row per metric/period/segment (architecture B). Defined in `db/migrations/0003_intel_schema.sql`. Written only by `src/storage/normalized_storage.py::NormalizedStorage`, whose only caller as of this pass is `db/sync/sync_normalized_from_pipeline.py` — an offline batch job, not the live request path. See "Why not wire it into serving" below.
+- **`intel.*`** — normalized, one row per metric/period/segment (architecture B). Defined in `db/migrations/0003_intel_schema.sql`. Written only by `src/storage/normalized_storage.py::NormalizedStorage`, whose only caller is `db/sync/sync_normalized_from_pipeline.py` — an offline batch job, not the live request path. See "Why not wire it into serving" below.
 
 Migrations are numbered and applied in order from `db/migrations/`. **All migrations so far are additive** (`create table if not exists`, `alter table ... add column if not exists`) — preserve that convention; never write a migration that drops or renames a column another migration or piece of running code depends on.
 
@@ -36,7 +36,7 @@ WHERE NOT (
 
 This replaced an earlier version that did `SELECT existing row -> resolve in Python -> UPSERT the winner`, which raced: two concurrent writers for the same natural key, or a write landing between another connection's SELECT and its own write, could bypass the rule. A single statement has no such window — Postgres evaluates the `WHERE` clause against the row as it exists at the instant of the write.
 
-**What this does not cover:** a hypothetical *third* writer that INSERTs/UPDATEs `intel.financial_metrics` directly, bypassing both `NormalizedStorage` and the bulk-ingestion script, would not be subject to this guard — it's enforced by the query text these two callers use, not by a database-level trigger or constraint. A `before insert or update` trigger would close that gap but needs a live Postgres to test its semantics correctly; noted as a next experiment (see `docs/NEXT_EXPERIMENTS.md`) rather than added speculatively here.
+**What this does not cover:** a hypothetical *third* writer that INSERTs/UPDATEs `intel.financial_metrics` directly, bypassing both `NormalizedStorage` and the bulk-ingestion script, would not be subject to this guard — it's enforced by the query text these two callers use, not by a database-level trigger or constraint. A `before insert or update` trigger would close that gap, but needs a live Postgres to verify its semantics correctly interact with `ON CONFLICT` before shipping it — not added speculatively here.
 
 ## Lineage columns (added `db/migrations/0006_lineage.sql`)
 

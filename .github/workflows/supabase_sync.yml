@@ -1,0 +1,104 @@
+# Applies db/migrations/*.sql to the live Supabase project and loads real
+# EDGAR filing data into intel.* via the existing, tested offline batch job
+# (db/sync/sync_normalized_from_pipeline.py). Runs on every push to main that
+# touches schema/sync-relevant paths, plus on demand.
+#
+# Required repository secrets (Settings -> Secrets and variables -> Actions):
+#   SUPABASE_DB_HOST      e.g. db.<project-ref>.supabase.co (required)
+#   SUPABASE_DB_PASSWORD  the database password (already set)
+#   SUPABASE_DB_PORT      optional, defaults to 5432
+#   SUPABASE_DB_USER      optional, defaults to postgres
+#   SUPABASE_DB_NAME      optional, defaults to postgres
+#
+# Migrations are additive-only (create/alter ... if not exists) and every
+# write in the sync job is an idempotent upsert (ON CONFLICT ...), so
+# re-running this on every push is safe -- it will not duplicate rows or
+# fail on objects that already exist.
+
+name: Supabase Schema & Data Sync
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "db/migrations/**"
+      - "db/sync/**"
+      - "src/storage/**"
+      - "src/extraction/pipeline.py"
+      - "evaluation/schema_conformance.py"
+      - "config.yaml"
+      - ".github/workflows/supabase_sync.yml"
+  workflow_dispatch: {}
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    env:
+      POSTGRES_HOST: ${{ secrets.SUPABASE_DB_HOST }}
+      POSTGRES_PORT: ${{ secrets.SUPABASE_DB_PORT }}
+      POSTGRES_USER: ${{ secrets.SUPABASE_DB_USER }}
+      POSTGRES_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      POSTGRES_DB: ${{ secrets.SUPABASE_DB_NAME }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check required secrets are configured
+        run: |
+          set -euo pipefail
+          if [ -z "${POSTGRES_HOST:-}" ]; then
+            echo "::error::SUPABASE_DB_HOST secret is not set -- see this workflow's header comment for the full list."
+            exit 1
+          fi
+          if [ -z "${POSTGRES_PASSWORD:-}" ]; then
+            echo "::error::SUPABASE_DB_PASSWORD secret is not set."
+            exit 1
+          fi
+          echo "POSTGRES_PORT=${POSTGRES_PORT:-5432}" >> "$GITHUB_ENV"
+          echo "POSTGRES_USER=${POSTGRES_USER:-postgres}" >> "$GITHUB_ENV"
+          echo "POSTGRES_DB=${POSTGRES_DB:-postgres}" >> "$GITHUB_ENV"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements-ci.txt') }}
+          restore-keys: ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-ci.txt
+
+      - name: Install postgresql-client
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends postgresql-client
+
+      - name: Apply migrations (additive-only, safe to re-run)
+        run: |
+          set -euo pipefail
+          export PGPASSWORD="$POSTGRES_PASSWORD"
+          for f in db/migrations/*.sql; do
+            echo "Applying $f ..."
+            psql "host=$POSTGRES_HOST port=$POSTGRES_PORT dbname=$POSTGRES_DB user=$POSTGRES_USER sslmode=require" \
+              -v ON_ERROR_STOP=1 -f "$f"
+          done
+
+      - name: Fetch real EDGAR filings
+        run: |
+          python scripts/fetch_edgar.py --tickers AAPL MSFT KO MRNA O --per-ticker 1 --resume
+
+      - name: Sync real filings into intel.* (idempotent upsert)
+        run: |
+          python db/sync/sync_normalized_from_pipeline.py
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "Migrations applied against $POSTGRES_HOST and real-filing sync attempted."
+          echo "See the 'Sync real filings' step output above for the Synced/Failed/Total counts."

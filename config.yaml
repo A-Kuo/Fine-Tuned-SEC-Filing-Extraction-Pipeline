@@ -107,7 +107,7 @@ logging:
   include_request_id: true
 
 edgar:
-  user_agent: "FinDocAnalyzer contact@example.com"
+  user_agent: "FinDocAnalyzer kuo.au7@gmail.com"
   requests_per_second: 10
   raw_dir: "data/raw_edgar"
   max_filings_per_run: 100

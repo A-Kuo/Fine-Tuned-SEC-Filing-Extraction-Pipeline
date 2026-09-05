@@ -5,11 +5,11 @@ authors:
   - family-names: "Kuo"
     given-names: "Austin"
     affiliation: "Independent Research"
-title: "FinDocAnalyzer: SEC Filing Extraction via QLoRA Fine-Tuned Llama 3.1"
+title: "Fine-Tuned SEC Filing Extraction Pipeline"
 version: 0.1.0
-date-released: 2025-03-18
-url: "https://github.com/akuo6/financial-llm"
-repository-code: "https://github.com/akuo6/financial-llm"
+date-released: 2026-03-17
+url: "https://github.com/A-Kuo/Fine-Tuned-SEC-Filing-Extraction-Pipeline"
+repository-code: "https://github.com/A-Kuo/Fine-Tuned-SEC-Filing-Extraction-Pipeline"
 license: MIT
 keywords:
   - large-language-models
@@ -19,4 +19,4 @@ keywords:
   - fine-tuning
   - information-extraction
   - llama
-abstract: "The untagged-prose extraction layer of a multi-repo SEC Filing Intelligence Platform: a dual-track (XBRL-precedence + heuristic + LLM) system for extracting structured financial data from the narrative sections of SEC 10-K/10-Q/8-K filings, using a QLoRA fine-tuned Llama 3.1 8B model with NF4 4-bit quantization. Schema conformance is 100% (6/6) across 1 synthetic and 5 real EDGAR filings; model loading and inference are validated on a 16GB single-GPU instance (Tesla T4). Extraction-accuracy and latency figures reported elsewhere for this project are unverified targets pending a trained adapter, not measured results — see docs/TRUTH_AUDIT.md in the repository for the current evidence status."
+abstract: "The untagged-prose extraction layer of a multi-repo SEC Filing Intelligence Platform: a dual-track (XBRL-precedence + heuristic + LLM) system for extracting structured financial data from the narrative sections of SEC 10-K/10-Q/8-K filings, using a QLoRA fine-tuned Llama 3.1 8B model with NF4 4-bit quantization. Schema conformance is 100% (6/6) across 1 synthetic and 5 real EDGAR filings; model loading and inference are validated on a 16GB single-GPU instance (Tesla T4). Extraction-accuracy and latency figures reported elsewhere for this project are unverified targets pending a trained adapter, not measured results — see the Evidence and Benchmarks section of the repository README for the current evidence status."
