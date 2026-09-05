@@ -4,10 +4,20 @@
 # touches schema/sync-relevant paths, plus on demand.
 #
 # Required repository secrets (Settings -> Secrets and variables -> Actions):
-#   SUPABASE_DB_HOST      e.g. db.<project-ref>.supabase.co (required)
-#   SUPABASE_DB_PASSWORD  the database password (already set)
-#   SUPABASE_DB_PORT      optional, defaults to 5432
-#   SUPABASE_DB_USER      optional, defaults to postgres
+#   SUPABASE_DB_HOST      the Supavisor POOLER host, e.g.
+#                         aws-0-<region>.pooler.supabase.com -- NOT the direct
+#                         db.<project-ref>.supabase.co host. GitHub-hosted
+#                         runners have no outbound IPv6, and Supabase's direct
+#                         connection host is IPv6-only, so it fails with
+#                         "Network is unreachable"; the pooler is IPv4.
+#   SUPABASE_DB_PASSWORD  the database password
+#   SUPABASE_DB_PORT      6543 for the pooler's transaction mode (used here;
+#                         fine for these additive, single-statement-per-
+#                         transaction DDL migrations) or 5432 for session
+#                         mode. Defaults to 5432 if unset -- set explicitly
+#                         when using the pooler.
+#   SUPABASE_DB_USER      the pooler requires postgres.<project-ref>, not
+#                         plain postgres. Defaults to postgres if unset.
 #   SUPABASE_DB_NAME      optional, defaults to postgres
 #
 # Migrations are additive-only (create/alter ... if not exists) and every
