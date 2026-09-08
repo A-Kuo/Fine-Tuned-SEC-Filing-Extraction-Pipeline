@@ -14,6 +14,7 @@ Endpoints:
     GET  /ab/results              - A/B test summary (when enabled)
     POST /ab/promote              - Promote challenger model to primary
     POST /webhook/alertmanager    - Receive Alertmanager callbacks
+    POST /rag/query               - Lightweight RAG demo over indexed filing sections
 """
 
 from __future__ import annotations
@@ -68,6 +69,10 @@ from src.extraction.inference import (
 from src.core.logging_config import configure_logging, set_request_id
 from src.extraction.postprocessing import parse_extraction, validate_extraction
 from serving.security import assert_api_key_if_configured
+from src.rag.embed import Embedder
+from src.rag.generate import generate_answer
+from src.rag.retrieve import retrieve
+from src.storage.normalized_storage import NormalizedStorage
 
 # ─── Prometheus metrics ─────────────────────────────────────────────────────
 EXTRACTION_TOTAL = Counter(
@@ -131,6 +136,16 @@ class ExtractResponseModel(BaseModel):
     error: str | None = None
     ab_variant: str | None = None
     cache_hit: bool = False
+
+
+class RagQueryRequest(BaseModel):
+    question: str = Field(..., min_length=1, max_length=1000)
+    top_k: int | None = Field(None, description="Override config.yaml's rag.top_k")
+
+
+class RagQueryResponse(BaseModel):
+    answer: str
+    sources: list[str] = Field(default_factory=list, description="filing_ids the model was shown")
 
 
 class HealthResponse(BaseModel):
@@ -213,6 +228,12 @@ class AppState:
         # persisted would both proceed. Keyed by filing_id or text_hash (see
         # _idempotency_key()).
         self.inflight_locks: dict[str, asyncio.Lock] = {}
+        # Lightweight RAG demo -- both lazily populated (rag_storage in
+        # lifespan(), rag_embedder on first /rag/query request) so booting
+        # the server never requires sentence-transformers/torch unless RAG
+        # is actually used.
+        self.rag_storage: NormalizedStorage | None = None
+        self.rag_embedder: Embedder | None = None
 
 
 state = AppState()
@@ -248,6 +269,23 @@ async def lifespan(app: FastAPI):
         logger.warning(f"Database not available: {e}")
         state.db = None
 
+    # intel.filing_sections (where RAG embeddings live) is a different
+    # schema in the same physical database as state.db's public.* tables --
+    # reuse the same connection params rather than introducing a second
+    # config block. Optional: RAG is a demo feature, so its absence must
+    # never prevent the server from starting.
+    if config.get("rag", {}).get("enabled", False):
+        try:
+            pg_cfg = config["database"]["postgres"]
+            state.rag_storage = NormalizedStorage(
+                host=pg_cfg["host"], port=pg_cfg["port"], user=pg_cfg["user"],
+                password=pg_cfg["password"], database=pg_cfg["database"],
+            )
+            state.rag_storage.connect()
+        except Exception as e:
+            logger.warning(f"RAG storage not available: {e}")
+            state.rag_storage = None
+
     # This used to default to f"http://{config['serving']['host']}:{config['serving']['port']}"
     # -- the SAME host:port this app itself binds to via uvicorn.run() below.
     # Pinging your own not-yet-listening address during your own startup
@@ -276,6 +314,8 @@ async def lifespan(app: FastAPI):
         await state.vllm_client.aclose()
     if state.db:
         state.db.close()
+    if state.rag_storage:
+        state.rag_storage.close()
     logger.info("Server shutdown")
 
 
@@ -363,6 +403,7 @@ def create_app(config: dict | None = None) -> FastAPI:
     app.add_api_route("/ab/promote", ab_promote, methods=["POST"])
     app.add_api_route("/webhook/alertmanager", alertmanager_receiver, methods=["POST"])
     app.add_api_route("/extractions/{filing_id}", get_extraction, methods=["GET"])
+    app.add_api_route("/rag/query", rag_query_route, methods=["POST"], response_model=RagQueryResponse)
 
     return app
 
@@ -636,6 +677,41 @@ async def ab_results() -> dict[str, Any]:
 async def ab_promote(body: ABPromoteRequest) -> dict[str, str]:
     logger.info(f"A/B promote requested: challenger={body.promote_challenger}")
     return {"status": "accepted", "detail": "Update adapter_path in config and redeploy to promote"}
+
+
+async def rag_query_route(req: RagQueryRequest) -> RagQueryResponse:
+    """Lightweight RAG demo: embed the question, retrieve similar filing
+    sections, generate a grounded answer. A capability demonstration, not
+    a production extraction path -- the fine-tuned model's JSON-extraction
+    route (/extract) remains the primary mechanism.
+
+    Only works when this server is running the model in-process (not in
+    vllm_url-offload mode, where there is no local FinancialLLM to call
+    .generate() on directly) -- stated explicitly rather than failing
+    silently in that mode.
+    """
+    if not state.rag_storage:
+        raise HTTPException(503, "RAG is not enabled or its storage is unavailable (see config.yaml's rag.enabled)")
+    if state.vllm_url or not state.engine:
+        raise HTTPException(503, "RAG requires the model running in-process; unavailable in vLLM-offload mode")
+
+    state.engine.initialize()
+    if state.rag_embedder is None:
+        rag_cfg = state.config.get("rag", {})
+        state.rag_embedder = Embedder(model_name=rag_cfg.get("embedding_model"))
+
+    top_k = req.top_k or state.config.get("rag", {}).get("top_k", 5)
+    max_tokens = state.config.get("rag", {}).get("max_tokens", 512)
+
+    question_embedding = state.rag_embedder.embed([req.question])[0]
+    retrieved = retrieve(question_embedding, top_k=top_k, storage=state.rag_storage)
+
+    model = state.engine.model
+    answer, sources = generate_answer(
+        req.question, retrieved,
+        generate_fn=lambda prompt: model.generate(prompt, max_tokens=max_tokens),
+    )
+    return RagQueryResponse(answer=answer, sources=sources)
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────

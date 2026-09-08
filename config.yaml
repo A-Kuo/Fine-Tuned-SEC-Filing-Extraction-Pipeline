@@ -122,6 +122,16 @@ ab_test:
   challenger_model_path: "models/llama-sec-v2"
   traffic_split: 0.1  # fraction to challenger
 
+# Lightweight RAG demo (src/rag/) -- a capability demonstration over real
+# filing data, not a production extraction path. embedding_model is local/
+# no-API-key (sentence-transformers); disabled by default since it's a
+# demo-only dependency requirements-ci.txt deliberately excludes.
+rag:
+  enabled: false
+  embedding_model: "sentence-transformers/all-MiniLM-L6-v2"
+  top_k: 5
+  max_tokens: 512
+
 database:
   postgres:
     host: "localhost"

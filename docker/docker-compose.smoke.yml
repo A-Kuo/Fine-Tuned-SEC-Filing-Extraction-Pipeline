@@ -16,7 +16,10 @@ version: "3.9"
 
 services:
   postgres:
-    image: postgres:16-alpine
+    # pgvector/pgvector:pg16 is a drop-in replacement for postgres:16-alpine
+    # that also ships the `vector` extension -- needed for
+    # intel.filing_sections.embedding (lightweight RAG demo).
+    image: pgvector/pgvector:pg16
     environment:
       POSTGRES_USER: finllm
       POSTGRES_PASSWORD: finllm_dev

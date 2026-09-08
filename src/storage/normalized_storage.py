@@ -88,6 +88,15 @@ class NormalizedStorage:
             return False
 
     def insert_section(self, row: dict) -> bool:
+        """Insert or refresh a filing section, including its prose content.
+
+        content was previously never written despite the table growing a
+        content column -- section text was discarded before it ever reached
+        this method (see section_to_row()). DO UPDATE (not DO NOTHING) on
+        content specifically so re-running the sync against already-populated
+        rows backfills it, rather than leaving existing rows permanently
+        without content.
+        """
         if not self._available:
             return False
         try:
@@ -95,13 +104,15 @@ class NormalizedStorage:
             cur.execute(
                 """
                 INSERT INTO intel.filing_sections (
-                    filing_id, section_type, title, char_start, char_end, confidence
-                ) VALUES (%s, %s, %s, %s, %s, %s)
-                ON CONFLICT (filing_id, section_type, char_start) DO NOTHING
+                    filing_id, section_type, title, char_start, char_end, confidence, content
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (filing_id, section_type, char_start) DO UPDATE SET
+                    content = EXCLUDED.content
                 """,
                 (
                     row["filing_id"], row["section_type"], row["title"],
                     row["char_start"], row["char_end"], row["confidence"],
+                    row.get("content"),
                 ),
             )
             return True
@@ -255,6 +266,55 @@ class NormalizedStorage:
         for mdna_row in rows["mdna_summaries"]:
             ok = self.upsert_mdna_summary(mdna_row) and ok
         return ok
+
+    def update_embeddings(self, rows: list[dict]) -> int:
+        """Batch-write embeddings for existing filing_sections rows.
+
+        rows: [{"section_id": int, "embedding": list[float]}, ...]. Uses
+        execute_values (matching db/sync/transfer_metrics.py's established
+        batching pattern) rather than one UPDATE per row. Returns the
+        number of rows successfully updated (0 if unavailable/rows empty).
+        """
+        if not self._available or not rows:
+            return 0
+        try:
+            import psycopg2.extras
+
+            cur = self._connection.cursor()
+            psycopg2.extras.execute_values(
+                cur,
+                """
+                UPDATE intel.filing_sections AS s SET
+                    embedding = data.embedding::vector
+                FROM (VALUES %s) AS data(section_id, embedding)
+                WHERE s.section_id = data.section_id
+                """,
+                [(r["section_id"], r["embedding"]) for r in rows],
+            )
+            return len(rows)
+        except Exception as e:
+            logger.error(f"intel.filing_sections embedding update error: {e}")
+            return 0
+
+    def get_sections_needing_embeddings(self) -> list[dict]:
+        """Sections with real content persisted but no embedding yet --
+        what scripts/build_rag_index.py embeds each run."""
+        if not self._available:
+            return []
+        try:
+            cur = self._connection.cursor()
+            cur.execute(
+                """
+                SELECT section_id, filing_id, section_type, content
+                FROM intel.filing_sections
+                WHERE content IS NOT NULL AND embedding IS NULL
+                """
+            )
+            cols = ["section_id", "filing_id", "section_type", "content"]
+            return [dict(zip(cols, row)) for row in cur.fetchall()]
+        except Exception as e:
+            logger.error(f"intel.filing_sections embedding-candidates query error: {e}")
+            return []
 
     def close(self):
         if self._connection:

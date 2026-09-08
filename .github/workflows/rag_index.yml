@@ -1,0 +1,76 @@
+# Builds embeddings for the lightweight RAG demo (scripts/build_rag_index.py).
+#
+# Deliberately kept OFF the push-triggered fast path (supabase_sync.yml,
+# backfill_live_schema.yml). sentence-transformers pulls in torch even for
+# CPU-only use, and requirements-ci.txt explicitly excludes torch/GPU
+# dependencies to keep every push's CI run at ~1-2 minutes. This workflow
+# installs the heavier RAG-only dependencies fresh and only runs on demand
+# or when RAG-specific files change.
+#
+# Assumes db/migrations/0007_rag_embeddings.sql has already been applied
+# (via supabase_sync.yml, which applies every file in db/migrations/) and
+# intel.filing_sections already has real section content persisted (via the
+# same sync). This workflow only computes and writes embeddings.
+#
+# Required repository secrets: same as supabase_sync.yml.
+
+name: Build RAG Embeddings
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [main]
+    paths:
+      - "scripts/build_rag_index.py"
+      - "src/rag/**"
+      - "db/migrations/0007_rag_embeddings.sql"
+      - ".github/workflows/rag_index.yml"
+
+jobs:
+  build-index:
+    runs-on: ubuntu-latest
+    env:
+      POSTGRES_HOST: ${{ secrets.SUPABASE_DB_HOST }}
+      POSTGRES_PORT: ${{ secrets.SUPABASE_DB_PORT }}
+      POSTGRES_USER: ${{ secrets.SUPABASE_DB_USER }}
+      POSTGRES_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      POSTGRES_DB: ${{ secrets.SUPABASE_DB_NAME }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check required secrets are configured
+        run: |
+          set -euo pipefail
+          if [ -z "${POSTGRES_HOST:-}" ]; then
+            echo "::error::SUPABASE_DB_HOST secret is not set."
+            exit 1
+          fi
+          if [ -z "${POSTGRES_PASSWORD:-}" ]; then
+            echo "::error::SUPABASE_DB_PASSWORD secret is not set."
+            exit 1
+          fi
+          echo "POSTGRES_PORT=${POSTGRES_PORT:-5432}" >> "$GITHUB_ENV"
+          echo "POSTGRES_USER=${POSTGRES_USER:-postgres}" >> "$GITHUB_ENV"
+          echo "POSTGRES_DB=${POSTGRES_DB:-postgres}" >> "$GITHUB_ENV"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-rag-${{ hashFiles('requirements-ci.txt') }}
+          restore-keys: ${{ runner.os }}-pip-rag-
+
+      - name: Install dependencies (including RAG-only sentence-transformers + torch)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-ci.txt
+          pip install sentence-transformers pgvector
+
+      - name: Build RAG index
+        run: |
+          python scripts/build_rag_index.py

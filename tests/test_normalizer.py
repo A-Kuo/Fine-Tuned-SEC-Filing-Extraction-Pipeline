@@ -140,6 +140,7 @@ class TestRowShaping:
             "char_start": 10,
             "char_end": 20,
             "confidence": 0.9,
+            "content": "body",
         }
 
     def test_metric_to_row_empty_period_segment_default_to_empty_string(self):

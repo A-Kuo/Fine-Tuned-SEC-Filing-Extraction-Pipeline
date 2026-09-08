@@ -65,6 +65,7 @@ def section_to_row(filing_id: str, section: SectionRecord) -> dict:
         "char_start": section.start,
         "char_end": section.end,
         "confidence": section.confidence,
+        "content": section.text,
     }
 
 

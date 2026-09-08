@@ -145,5 +145,102 @@ class TestSaveFilingRecord:
         assert mock_cursor.execute.call_count == 5
 
 
+class TestInsertSectionContent:
+    """content was previously discarded before insert_section() ever saw it
+    -- these confirm both the row-builder and the INSERT itself now carry
+    the real section prose (needed for the RAG demo's embeddings)."""
+
+    def test_section_to_row_includes_content(self):
+        from src.extraction.normalizer import section_to_row
+
+        section = SectionRecord(
+            section_type="mdna", title="MD&A", text="real section prose",
+            start=0, end=19, confidence=0.9,
+        )
+        row = section_to_row("f-1", section)
+        assert row["content"] == "real section prose"
+
+    def test_insert_section_writes_content(self):
+        storage = _make_storage()
+        mock_cursor = MagicMock()
+        storage._connection.cursor = MagicMock(return_value=mock_cursor)
+
+        row = {
+            "filing_id": "f-1", "section_type": "mdna", "title": "t",
+            "char_start": 0, "char_end": 10, "confidence": 0.9,
+            "content": "real section prose",
+        }
+        assert storage.insert_section(row) is True
+        params = mock_cursor.execute.call_args[0][1]
+        assert "real section prose" in params
+
+    def test_insert_section_upserts_content_on_conflict(self):
+        """A re-run against an already-populated row must refresh content,
+        not silently skip it (DO UPDATE, not DO NOTHING)."""
+        storage = _make_storage()
+        mock_cursor = MagicMock()
+        storage._connection.cursor = MagicMock(return_value=mock_cursor)
+
+        row = {
+            "filing_id": "f-1", "section_type": "mdna", "title": "t",
+            "char_start": 0, "char_end": 10, "confidence": 0.9,
+            "content": "refreshed prose",
+        }
+        storage.insert_section(row)
+        sql = mock_cursor.execute.call_args[0][0]
+        assert "DO UPDATE" in sql
+        assert "DO NOTHING" not in sql
+
+
+class TestEmbeddingMethods:
+    def test_update_embeddings_batches_via_execute_values(self):
+        """Matches db/sync/transfer_metrics.py's established batching
+        pattern -- one execute_values call, not one UPDATE per row.
+        execute_values is patched directly (not run against a mocked
+        cursor) since it needs cursor.connection.encoding to be a real
+        string internally, which a MagicMock can't provide."""
+        from unittest.mock import patch
+
+        storage = _make_storage()
+        mock_cursor = MagicMock()
+        storage._connection.cursor = MagicMock(return_value=mock_cursor)
+
+        rows = [
+            {"section_id": 1, "embedding": [0.1, 0.2]},
+            {"section_id": 2, "embedding": [0.3, 0.4]},
+        ]
+        with patch("psycopg2.extras.execute_values") as mock_execute_values:
+            updated = storage.update_embeddings(rows)
+
+        assert updated == 2
+        mock_execute_values.assert_called_once()
+        values_arg = mock_execute_values.call_args[0][2]
+        assert values_arg == [(1, [0.1, 0.2]), (2, [0.3, 0.4])]
+
+    def test_update_embeddings_returns_zero_for_empty_rows(self):
+        storage = _make_storage()
+        assert storage.update_embeddings([]) == 0
+
+    def test_update_embeddings_returns_zero_when_unavailable(self):
+        storage = NormalizedStorage("localhost", 5432, "user", "pass", "db")
+        storage._available = False
+        assert storage.update_embeddings([{"section_id": 1, "embedding": [0.1]}]) == 0
+
+    def test_get_sections_needing_embeddings_filters_correctly(self):
+        storage = _make_storage()
+        mock_cursor = MagicMock()
+        mock_cursor.fetchall = MagicMock(return_value=[
+            (1, "f-1", "mdna", "some text"),
+        ])
+        storage._connection.cursor = MagicMock(return_value=mock_cursor)
+
+        sections = storage.get_sections_needing_embeddings()
+        assert len(sections) == 1
+        assert sections[0]["content"] == "some text"
+        sql = mock_cursor.execute.call_args[0][0]
+        assert "content IS NOT NULL" in sql
+        assert "embedding IS NULL" in sql
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

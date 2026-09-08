@@ -8,6 +8,11 @@
 
 CREATE SCHEMA IF NOT EXISTS intel;
 
+-- Needed for filing_sections.embedding below (lightweight RAG demo). Requires
+-- the pgvector/pgvector Postgres image locally -- vanilla postgres:16-alpine
+-- doesn't ship this extension. See docker-compose.yml.
+CREATE EXTENSION IF NOT EXISTS vector;
+
 CREATE TABLE IF NOT EXISTS intel.filings (
     filing_id VARCHAR(64) PRIMARY KEY,
     cik VARCHAR(10),
@@ -29,6 +34,8 @@ CREATE TABLE IF NOT EXISTS intel.filing_sections (
     char_start INTEGER NOT NULL,
     char_end INTEGER NOT NULL,
     confidence REAL NOT NULL DEFAULT 1.0,
+    content TEXT,
+    embedding VECTOR(384),
     created_at TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE (filing_id, section_type, char_start)
 );
