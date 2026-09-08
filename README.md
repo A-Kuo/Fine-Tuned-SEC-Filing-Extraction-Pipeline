@@ -190,6 +190,16 @@ Domain-adapted extraction model
 | Effective batch size | 32 |
 | Learning rate | 5e-4 with cosine decay |
 
+### Trainable-parameter accounting
+
+The active `LoraConfig` does not specify `modules_to_save`; embeddings and `lm_head` remain frozen. The configured LoRA adapters therefore contain approximately **42M trainable parameters, about 0.52% of the 8.03B base model**. This count accounts for:
+- **7 target modules** per layer (q, k, v, o projections + gate, up, down MLP projections)
+- **Grouped-query attention dimensions**: k and v projections output 1024 dimensions (8 KV heads × 128), not 4096
+- **MLP intermediate width**: 14336-dimensional projections in gate/up/down, not 4096
+- **32 transformer layers** in Llama 3.1 8B
+
+Earlier documentation citing ~200M trainable parameters was incorrect because it assumed trainable embeddings and output-head weights that `create_lora_config()` never enables (no `modules_to_save` parameter is passed). A naive flat-dimension estimate (treating every projection as 4096×4096) also undercounts — the actual per-module breakdown is richer: q/o are 4096→4096 (each 131K params), k/v are 4096→1024 (each 82K), gate/up are 4096→14336 (each 295K), down is 14336→4096 (295K), totaling ~1.31M per layer × 32 layers = ~42M.
+
 The goal is not to teach general financial language from scratch. The goal is to adapt a strong base model so it better understands how SEC filings present structured financial information in prose and semi-structured text.
 
 ---
@@ -250,7 +260,7 @@ comparison. Treat the table below as an unverified target, not a result, until
 | Inference latency (p50) | ~320 ms / document | **Unverified target** — not sourced to a script or run in this repo |
 | Throughput | ~60 docs / min | **Unverified target** — `evaluation/benchmark.py --simulate` generates matching numbers synthetically; no live run is checked in |
 | Memory footprint | 7.2 GB | Theoretical NF4 calculation, not a measured runtime footprint |
-| Trainable parameters | ~200M / 8B | Real — LoRA r=16 parameter count is arithmetic, not measured |
+| Trainable parameters | ~42M / 8.03B (0.52%) | Real — LoRA r=16 parameter count is arithmetic from `config.yaml`'s 7 target modules against Llama-3.1-8B's actual per-module dimensions (accounts for GQA's narrower k/v projections and the MLP's wider intermediate dim), not measured |
 | Real model-load, Tesla T4 16GB | 152.0s load, 1,951 MB resident | **Real, measured** — [notebooks/inference_eval.ipynb](notebooks/inference_eval.ipynb), run 2026-08-28. NF4 base model only (no adapter yet) |
 
 ### Real evidence in this repo

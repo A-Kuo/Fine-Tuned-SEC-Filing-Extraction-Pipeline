@@ -202,6 +202,80 @@ class TestDatabaseManager:
         assert mock_cursor.execute.call_count >= 2  # INSERT extractions + INSERT logs
         mgr.cache._client.setex.assert_called_once()
 
+    def test_store_extraction_defaults_method_to_llm(self):
+        """Default method='llm' preserves the live /extract route's real
+        behavior unchanged -- it never passes method explicitly, and it only
+        ever runs the fine-tuned model."""
+        mgr = self._make_manager()
+        mock_cursor = MagicMock()
+        mgr.storage._connection.cursor = MagicMock(return_value=mock_cursor)
+
+        result = ExtractionResult(filing_id="f1", company_name="Apple Inc.", filing_type="10-K", date="2023-11-03")
+        mgr.store_extraction(filing_id="f1", result=result, confidence=0.9, latency_ms=100, model_version="v1")
+
+        insert_call = mock_cursor.execute.call_args_list[0]
+        params = insert_call[0][1]
+        assert "llm" in params
+
+    def test_store_extraction_passes_through_provenance_fields(self):
+        """method/ticker/sector/fiscal_year_end must reach the INSERT params
+        so a non-LLM caller (e.g. an XBRL-derived backfill) can label its
+        rows honestly instead of silently defaulting to method='llm'."""
+        mgr = self._make_manager()
+        mock_cursor = MagicMock()
+        mgr.storage._connection.cursor = MagicMock(return_value=mock_cursor)
+
+        result = ExtractionResult(filing_id="f1", company_name="Apple Inc.", filing_type="10-K", date="2023-11-03")
+        mgr.store_extraction(
+            filing_id="f1", result=result, confidence=1.0, latency_ms=5, model_version="backfill-xbrl-v1",
+            method="xbrl", ticker="AAPL", sector="Technology", fiscal_year_end="2023-09-30",
+        )
+
+        insert_call = mock_cursor.execute.call_args_list[0]
+        params = insert_call[0][1]
+        assert "xbrl" in params
+        assert "AAPL" in params
+        assert "Technology" in params
+        assert "2023-09-30" in params
+
+
+class TestPipelineStageUUID:
+    """upsert_pipeline_stage previously raised a Postgres type error on every
+    real call: it inserted a filing_id string into a uuid primary key column,
+    silently swallowed by a broad except. This table plausibly never
+    received a real row until the fix."""
+
+    def _make_storage(self) -> PostgresStorage:
+        storage = PostgresStorage("localhost", 5432, "user", "pass", "db")
+        storage._available = True
+        storage._connection = MagicMock()
+        return storage
+
+    def test_generates_valid_uuid_for_extraction_id(self):
+        import uuid
+        storage = self._make_storage()
+        mock_cursor = MagicMock()
+        storage._connection.cursor = MagicMock(return_value=mock_cursor)
+
+        ok = storage.upsert_pipeline_stage("AAPL-0000320193-25-000079", "extracted", ticker="AAPL")
+        assert ok is True
+
+        params = mock_cursor.execute.call_args[0][1]
+        extraction_id = params[0]
+        uuid.UUID(extraction_id)  # must not raise
+
+    def test_filing_id_stored_in_its_own_column(self):
+        storage = self._make_storage()
+        mock_cursor = MagicMock()
+        storage._connection.cursor = MagicMock(return_value=mock_cursor)
+
+        storage.upsert_pipeline_stage("AAPL-0000320193-25-000079", "extracted", ticker="AAPL")
+
+        params = mock_cursor.execute.call_args[0][1]
+        assert "AAPL-0000320193-25-000079" in params
+        assert "extracted" in params
+        assert "AAPL" in params
+
 
 # ─── Graceful Degradation ────────────────────────────────────────────────────
 

@@ -11,7 +11,13 @@ Mathematical Foundation:
         W' = W + BA     where B ∈ R^{d×r}, A ∈ R^{r×k}, r << min(d,k)
 
     This reduces trainable params from d×k to r×(d+k).
-    For Llama 8B with r=16: 8B frozen → ~200M trainable (2.5% of total).
+    For Llama 3.1 8B with r=16 across this config's 7 target modules:
+    8.03B frozen → ~42M trainable (0.52% of total). See create_lora_config()
+    below for the per-module breakdown (accounts for GQA's narrower k/v
+    projections and the MLP's wider intermediate dim -- a flat d×d estimate
+    for every module, as an earlier version of this docstring used,
+    undercounts by ~30% and overstates by far more once you add the
+    embeddings/head that create_lora_config() does NOT make trainable).
 
     QLoRA adds 4-bit NormalFloat quantization to the frozen weights:
         W_frozen stored in NF4 (7.2GB vs 32GB at FP32)
@@ -177,11 +183,18 @@ def create_lora_config(config: dict) -> LoraConfig:
     low-rank adaptation is most effective for instruction following.
 
     Parameter count with r=16:
-        Each target module adds 2 × d_model × r parameters
-        For Llama 8B (d=4096), 7 target modules:
-            7 × 2 × 4096 × 16 = 917,504 per layer
-            × 32 layers = ~29.4M LoRA params
-        Plus embeddings/head ≈ 200M total trainable
+        Each target module adds r × (d_in + d_out) parameters (A is
+        r×d_in, B is d_out×r). Llama 3.1 8B uses GQA (8 KV heads, head_dim
+        128 -> k_proj/v_proj output dim 1024, not 4096) and a 14336-wide
+        MLP intermediate, so d_in/d_out differ by module -- a flat 4096×4096
+        estimate for every module undercounts:
+            q_proj/o_proj:       16 × (4096+4096)  =   131,072 each
+            k_proj/v_proj:       16 × (4096+1024)  =    81,920 each
+            gate_proj/up_proj:   16 × (4096+14336) =   294,912 each
+            down_proj:           16 × (14336+4096) =   294,912
+            per layer: 1,310,720 × 32 layers = ~41.9M LoRA params
+        No modules_to_save is passed below, so embeddings/lm_head are NOT
+        trainable -- total trainable ≈ 42M / 8.03B ≈ 0.52%.
     """
     lora_cfg = config["lora"]
 
@@ -433,7 +446,7 @@ def train(
     4. Inject LoRA adapters
     5. Load + format dataset
     6. Train with SFTTrainer
-    7. Save adapter weights (~200MB)
+    7. Save adapter weights (~85MB, fp16)
 
     config_overrides: a nested dict merged into the loaded config before the
     scalar CLI-style args below are applied (so those still win if both are

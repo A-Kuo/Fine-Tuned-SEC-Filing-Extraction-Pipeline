@@ -1,0 +1,83 @@
+# Backfills the public.* live-serving schema (extractions, extraction_logs,
+# ab_test_results, pipeline_stages) with real, honestly-derived data --
+# nobody has ever run the live /extract API against Supabase, so these
+# tables sit empty next to the populated intel.* batch schema. See
+# scripts/backfill_live_schema.py's module docstring for exactly what is
+# and isn't populated, and why.
+#
+# Kept separate from supabase_sync.yml (which owns migrations + the
+# intel.* batch sync) rather than bolted on as an extra step, since it's a
+# genuinely distinct concern with its own script and its own failure mode.
+# Assumes supabase_sync.yml has already applied db/migrations/*.sql -- this
+# workflow does not re-apply them.
+#
+# Required repository secrets: same as supabase_sync.yml (SUPABASE_DB_HOST/
+# PORT/USER/PASSWORD/NAME, mapped below to POSTGRES_*). See that workflow's
+# header comment for the pooler-vs-direct-connection details.
+#
+# Every write here is either an idempotent upsert or a fresh row per
+# filing, so re-running this is safe.
+
+name: Backfill Live-Serving Schema
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/backfill_live_schema.py"
+      - "scripts/parse_xbrl.py"
+      - "src/storage/database.py"
+      - ".github/workflows/backfill_live_schema.yml"
+  workflow_dispatch: {}
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    env:
+      POSTGRES_HOST: ${{ secrets.SUPABASE_DB_HOST }}
+      POSTGRES_PORT: ${{ secrets.SUPABASE_DB_PORT }}
+      POSTGRES_USER: ${{ secrets.SUPABASE_DB_USER }}
+      POSTGRES_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      POSTGRES_DB: ${{ secrets.SUPABASE_DB_NAME }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check required secrets are configured
+        run: |
+          set -euo pipefail
+          if [ -z "${POSTGRES_HOST:-}" ]; then
+            echo "::error::SUPABASE_DB_HOST secret is not set."
+            exit 1
+          fi
+          if [ -z "${POSTGRES_PASSWORD:-}" ]; then
+            echo "::error::SUPABASE_DB_PASSWORD secret is not set."
+            exit 1
+          fi
+          echo "POSTGRES_PORT=${POSTGRES_PORT:-5432}" >> "$GITHUB_ENV"
+          echo "POSTGRES_USER=${POSTGRES_USER:-postgres}" >> "$GITHUB_ENV"
+          echo "POSTGRES_DB=${POSTGRES_DB:-postgres}" >> "$GITHUB_ENV"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements-ci.txt') }}
+          restore-keys: ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-ci.txt
+
+      - name: Fetch real EDGAR filings (self-contained, doesn't depend on other workflow runs)
+        run: |
+          python scripts/fetch_edgar.py --tickers AAPL MSFT KO MRNA O --per-ticker 1 --resume
+
+      - name: Backfill public.* with real XBRL-derived data
+        run: |
+          python scripts/backfill_live_schema.py

@@ -37,8 +37,9 @@ psycopg2-binary>=2.9.9
 redis>=5.0.0
 sqlalchemy>=2.0.0
 
-# Supabase integration (Remove this before next commit)
-# https://vjsztpxovgdarztyyouv.supabase.co
+# Retrieval-augmented generation (lightweight demo -- see src/rag/)
+sentence-transformers>=2.2.2
+pgvector>=0.2.4
 
 # Monitoring & evaluation
 streamlit>=1.29.0

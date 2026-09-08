@@ -30,6 +30,7 @@ Usage:
 
 import json
 import time
+import uuid
 from datetime import datetime
 from typing import Optional
 
@@ -145,18 +146,35 @@ class PostgresStorage:
     """
 
     def __init__(self, host: str, port: int, user: str, password: str, database: str):
-        self._dsn = f"postgresql://{user}:{password}@{host}:{port}/{database}"
+        self._host = host
+        self._port = port
+        self._user = user
+        self._password = password
+        self._database = database
         self._connection = None
         self._available = False
 
     def connect(self) -> bool:
-        """Establish PostgreSQL connection."""
+        """Establish PostgreSQL connection.
+
+        Uses discrete keyword arguments rather than a postgresql:// URI --
+        a URI built by string interpolation breaks for any password
+        containing URI-reserved characters (%, ?, /, @, etc.), which a raw
+        f-string DSN doesn't escape. Same bug and same fix as
+        NormalizedStorage.connect() (src/storage/normalized_storage.py).
+        """
         try:
             import psycopg2
-            self._connection = psycopg2.connect(self._dsn)
+            self._connection = psycopg2.connect(
+                host=self._host,
+                port=self._port,
+                user=self._user,
+                password=self._password,
+                dbname=self._database,
+            )
             self._connection.autocommit = True
             self._available = True
-            logger.info(f"PostgreSQL connected: {self._dsn.split('@')[1]}")
+            logger.info(f"PostgreSQL connected: {self._host}:{self._port}/{self._database}")
             return True
         except Exception as e:
             logger.warning(f"PostgreSQL unavailable: {e}. Extractions will not be persisted.")
@@ -172,6 +190,10 @@ class PostgresStorage:
         model_version: str,
         raw_output: str = "",
         text_hash: str | None = None,
+        method: str = "llm",
+        ticker: str | None = None,
+        sector: str | None = None,
+        fiscal_year_end: str | None = None,
     ) -> bool:
         """Store extraction result. Uses UPSERT to handle re-extractions.
 
@@ -180,6 +202,14 @@ class PostgresStorage:
         but never actually set by any code path until this. It's what lets
         get_extraction_by_text_hash() find a prior result for a request that
         arrives without a filing_id.
+
+        method/ticker/sector/fiscal_year_end also existed in the schema
+        unused until now -- method defaults to 'llm' to match every existing
+        caller's real behavior (the live /extract route only ever runs the
+        fine-tuned model), so this default introduces no behavior change for
+        that path. Non-LLM callers (e.g. an XBRL-derived backfill) should
+        pass method='xbrl' explicitly so rows are labeled by actual
+        provenance instead of defaulting to a method that never ran.
         """
         if not self._available:
             return False
@@ -192,9 +222,9 @@ class PostgresStorage:
                     filing_id, company_name, filing_type, filing_date,
                     revenue, net_income, total_assets, total_liabilities, eps,
                     confidence_score, extraction_time_ms, model_version, raw_output,
-                    request_text_hash, updated_at
+                    request_text_hash, method, ticker, sector, fiscal_year_end, updated_at
                 ) VALUES (
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW()
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW()
                 )
                 ON CONFLICT (filing_id) DO UPDATE SET
                     company_name = EXCLUDED.company_name,
@@ -210,6 +240,10 @@ class PostgresStorage:
                     model_version = EXCLUDED.model_version,
                     raw_output = EXCLUDED.raw_output,
                     request_text_hash = EXCLUDED.request_text_hash,
+                    method = EXCLUDED.method,
+                    ticker = EXCLUDED.ticker,
+                    sector = EXCLUDED.sector,
+                    fiscal_year_end = EXCLUDED.fiscal_year_end,
                     updated_at = NOW()
                 """,
                 (
@@ -227,6 +261,10 @@ class PostgresStorage:
                     model_version,
                     raw_output,
                     text_hash,
+                    method,
+                    ticker,
+                    sector,
+                    fiscal_year_end,
                 ),
             )
             return True
@@ -500,22 +538,29 @@ class PostgresStorage:
             logger.error(f"ab_test_results insert error: {e}")
             return False
 
-    def upsert_pipeline_stage(self, extraction_id: str, stage: str, ticker: str | None = None) -> bool:
-        """Track pipeline stage for downstream consumers."""
+    def upsert_pipeline_stage(self, filing_id: str, stage: str, ticker: str | None = None) -> bool:
+        """Track pipeline stage for downstream consumers.
+
+        pipeline_stages.extraction_id is a uuid primary key, but every real
+        caller only has a filing_id string on hand -- passing that string
+        straight into a uuid column raised a Postgres type error on every
+        call, silently swallowed by the except below, so this table has
+        plausibly never received a real row. Generate a real uuid here and
+        store the filing_id in its own column (declared in the schema,
+        previously never written) so callers keep passing what they
+        actually have.
+        """
         if not self._available:
             return False
         try:
+            extraction_id = str(uuid.uuid4())
             cur = self._connection.cursor()
             cur.execute(
                 """
-                INSERT INTO pipeline_stages (extraction_id, stage, ticker, updated_at)
-                VALUES (%s, %s, %s, NOW())
-                ON CONFLICT (extraction_id) DO UPDATE SET
-                    stage = EXCLUDED.stage,
-                    ticker = COALESCE(EXCLUDED.ticker, pipeline_stages.ticker),
-                    updated_at = NOW()
+                INSERT INTO pipeline_stages (extraction_id, filing_id, stage, ticker, updated_at)
+                VALUES (%s, %s, %s, %s, NOW())
                 """,
-                (extraction_id, stage, ticker),
+                (extraction_id, filing_id, stage, ticker),
             )
             return True
         except Exception as e:
@@ -746,6 +791,10 @@ class DatabaseManager:
         status: str = "success",
         error: str | None = None,
         text_hash: str | None = None,
+        method: str = "llm",
+        ticker: str | None = None,
+        sector: str | None = None,
+        fiscal_year_end: str | None = None,
     ) -> bool:
         """Store extraction result in both tiers.
 
@@ -757,7 +806,8 @@ class DatabaseManager:
         # Always persist to PostgreSQL
         pg_ok = self.storage.store_extraction(
             filing_id, result, confidence, latency_ms, model_version, raw_output,
-            text_hash=text_hash,
+            text_hash=text_hash, method=method, ticker=ticker, sector=sector,
+            fiscal_year_end=fiscal_year_end,
         )
 
         # Always log the attempt
