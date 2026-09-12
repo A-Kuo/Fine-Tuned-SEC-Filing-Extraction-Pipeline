@@ -1,5 +1,3 @@
-version: "3.9"
-
 # Self-contained smoke-test stack: API + Redis + PostgreSQL together, so a
 # real extraction request can be fired end-to-end without depending on a
 # separately-managed Postgres/Redis (unlike docker/docker-compose.yml, whose
@@ -30,7 +28,7 @@ services:
       - ../scripts/init_db.sql:/docker-entrypoint-initdb.d/01_init.sql
       - ../scripts/init_normalized_schema.sql:/docker-entrypoint-initdb.d/02_init_normalized_schema.sql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U finllm"]
+      test: ["CMD-SHELL", "pg_isready -U finllm -d financial_llm"]
       interval: 5s
       timeout: 5s
       retries: 10

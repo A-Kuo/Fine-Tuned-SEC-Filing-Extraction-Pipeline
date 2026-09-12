@@ -16,7 +16,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Install Python dependencies
 COPY requirements.txt .
-RUN pip install --no-cache-dir --user -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 # ============================================================================
 # Stage 2: Production
@@ -25,12 +25,17 @@ FROM python:3.11-slim as production
 
 WORKDIR /app
 
-# Copy installed packages from builder
-COPY --from=builder /root/.local /root/.local
+# Copy installed packages from builder. System-wide (not --user/~/.local) so
+# they're importable regardless of which user runs the container -- a
+# --user install under root's home is invisible to the non-root appuser
+# this image switches to below, which made every third-party import
+# (httpx first, alphabetically/positionally, but all of them) fail with
+# ModuleNotFoundError the first time this image was actually run end-to-end.
+COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
 
 # Set environment
-ENV PATH=/root/.local/bin:$PATH \
-    PYTHONDONTWRITEBYTECODE=1 \
+ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONFAULTHANDLER=1
 

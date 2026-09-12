@@ -1,6 +1,6 @@
 # Fine-Tuned-SEC-Filing-Extraction-Pipeline
 
-**The untagged-prose extraction layer of the SEC Filing Intelligence Platform** — QLoRA fine-tuned Llama 3.1 8B, dual-track XBRL+LLM extraction, FastAPI serving. One component in a multi-repo stack: this repo does not perform EDGAR ingestion — see [Related Repositories](#related-repositories) and [`docs/BOUNDARY.md`](docs/BOUNDARY.md) for the upstream repo that does.
+**The untagged-prose extraction layer for SEC filings** — QLoRA fine-tuned Llama 3.1 8B, dual-track XBRL+LLM extraction, FastAPI serving. Fetches real filings from SEC EDGAR (`scripts/fetch_edgar.py`) and extracts structured data from the narrative prose that iXBRL tagging doesn't cover, alongside (not instead of) already-tagged XBRL facts. See [`docs/BOUNDARY.md`](docs/BOUNDARY.md) for the xbrl-vs-llm precedence rule this enforces.
 
 [![CI](https://github.com/A-Kuo/Fine-Tuned-SEC-Filing-Extraction-Pipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/A-Kuo/Fine-Tuned-SEC-Filing-Extraction-Pipeline/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/Python-3.12%2B-blue?logo=python&logoColor=blue&style=plastic)](https://www.python.org/downloads/release/python-3120/)
@@ -33,7 +33,6 @@ This repo sits **downstream** of EDGAR/iXBRL ingestion: it consumes filing text 
 - [Monitoring](#monitoring)
 - [Planned Integrations](#planned-integrations)
 - [Limitations](#limitations)
-- [Related Repositories](#related-repositories)
 - [Citation](#citation)
 
 ---
@@ -50,7 +49,7 @@ This repo is best understood as the untagged-prose extraction layer in a broader
 
 SEC filings are the one financial disclosure corpus that is simultaneously (a) legally mandated — every US public company must file 10-Ks, 10-Qs, and 8-Ks under the Securities Exchange Act of 1934, so coverage is comprehensive rather than opt-in — and (b) freely, publicly accessible via SEC EDGAR's own APIs (`data.sec.gov`), with no paywall or commercial-vendor licensing barrier. That combination is what makes it viable as a research and portfolio dataset at all.
 
-The more specific reason this repo exists: iXBRL tagging already covers core financial-statement line items (revenue, net income, balance-sheet figures) in a fully structured, machine-readable form — see [`docs/BOUNDARY.md`](docs/BOUNDARY.md) for the companion pipeline that owns that tagged layer. But a large and consequential share of what a filing actually discloses — MD&A narrative, risk factors, footnote detail, non-GAAP reconciliations — is never tagged, because XBRL's taxonomy doesn't cover free-form prose. That untagged remainder is exactly what deterministic parsers can't reach and what this repo's dual-track (XBRL-precedence + heuristic + LLM) extraction targets. The research question this repo answers is narrow and concrete: can a small, fine-tuned open model extract structured facts from that untagged prose reliably enough to be useful *alongside* — never instead of — the tagged ground truth.
+The more specific reason this repo exists: iXBRL tagging already covers core financial-statement line items (revenue, net income, balance-sheet figures) in a fully structured, machine-readable form — see [`docs/BOUNDARY.md`](docs/BOUNDARY.md) for how this repo treats that already-tagged layer as ground truth. But a large and consequential share of what a filing actually discloses — MD&A narrative, risk factors, footnote detail, non-GAAP reconciliations — is never tagged, because XBRL's taxonomy doesn't cover free-form prose. That untagged remainder is exactly what deterministic parsers can't reach and what this repo's dual-track (XBRL-precedence + heuristic + LLM) extraction targets. The research question this repo answers is narrow and concrete: can a small, fine-tuned open model extract structured facts from that untagged prose reliably enough to be useful *alongside* — never instead of — the tagged ground truth.
 
 ### Human-in-the-Loop by Design
 
@@ -507,7 +506,7 @@ This extraction system is designed to be one component in a broader financial in
 - dashboarding or agentic visualization layers
 - persistence or registry layers for model outputs and extracted facts
 
-The upstream ingestion boundary (`sec-edgar-extraction-pipeline`, tagged iXBRL facts) is real and documented in [`docs/BOUNDARY.md`](docs/BOUNDARY.md) — that's the one integration point that's actually load-bearing, in that this repo's `method='xbrl'` facts are meant to be reconciled against it, not that live code calls it.
+The xbrl-vs-llm precedence rule this repo enforces (`method='xbrl'` facts are never overwritten by `method='llm'` facts for the same key) is documented in [`docs/BOUNDARY.md`](docs/BOUNDARY.md).
 
 ---
 
@@ -521,23 +520,9 @@ This repository has several important limitations, each backed by the evidence c
 - **Docker-gated benchmarks are code-complete but unexecuted.** The live docker-compose smoke test, the ingestion throughput benchmark, and the concurrency load harness all need a working Docker daemon, which the environment that built them didn't have.
 - **Gated base model dependency:** some workflows depend on access to Llama 3.1 weights through Hugging Face.
 - **Notebook execution can drift from the main branch:** a past `src/` reorg silently broke both notebooks' imports with nothing to catch it — `tests/test_imports.py` now guards the repo side of this, but notebook cells aren't covered by CI.
-- **Upstream dependency exists by design:** this repo is not a full SEC ingestion pipeline (see [`docs/BOUNDARY.md`](docs/BOUNDARY.md)) and depends on filing text being available from elsewhere.
 - **No DB-level trigger enforces xbrl-precedence.** It's enforced atomically in the `ON CONFLICT` clause of every current writer, but a hypothetical future writer bypassing those code paths wouldn't be stopped by the database itself.
 
 See [`MODEL_CARD.md`](MODEL_CARD.md) for a fuller discussion of risks, assumptions, and intended use.
-
----
-
-## Related Repositories
-
-This repo is one component of a multi-repo platform — see [`docs/BOUNDARY.md`](docs/BOUNDARY.md) for the exact seam between this repo and the upstream EDGAR ingestion pipeline.
-
-| Repository | Role | Status |
-|-----------|------|--------|
-| [SEC EDGAR extraction pipeline](https://github.com/A-Kuo/sec-edgar-extraction-pipeline) | Upstream ingestion and deterministic iXBRL-tagged fact extraction | Separate repo — verify its own README for current status before citing jointly |
-| [Transformer Aspect-Based Sentiment Analysis](https://github.com/A-Kuo/Transformer-Aspect-Based-Sentiment-Analysis) | Downstream qualitative analysis over filing text | Planned — no working integration exists in this repo |
-| [Financial Economic Ticker Analyzer Agent](https://github.com/A-Kuo/Financial-Economic-Ticker-Analyzer-Agent) | Downstream market-intelligence enrichment | Planned — no working integration exists in this repo |
-| [Agentic Visualization Framework](https://github.com/A-Kuo/Agentic-Visualization-Framework) | Downstream visualization and dashboard generation | Planned — no working integration exists in this repo |
 
 ---
 

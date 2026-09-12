@@ -5,8 +5,6 @@
 #   docker compose -f docker-compose.pipeline.yml up -d
 #   docker compose -f docker-compose.pipeline.yml logs -f findoc-analyzer
 
-version: "3.9"
-
 services:
   # ============================================================================
   # Stage 1: FinDocAnalyzer (Document Extraction Layer)
