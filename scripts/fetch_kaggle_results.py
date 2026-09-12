@@ -97,6 +97,27 @@ def build_metrics_summary(
     }
 
 
+def assert_real_training_occurred(summary: dict) -> None:
+    """Fail loudly if this run produced no real training data.
+
+    Without this, a crashed/degraded Kaggle kernel (e.g. the data-generation
+    bug that used to make training/train.py crash with FileNotFoundError
+    before any training step) would still let this script write an all-null
+    metrics.json and exit 0 -- and kaggle_training.yml's final
+    `git commit ... || exit 0` step would then find something to commit
+    either way, making the failure look like a successful green-checkmark
+    workflow run with a real result. metrics.json/history are still written
+    before this call (for debugging what went wrong), but the process must
+    not exit 0 on a degraded run.
+    """
+    if "note" in summary:
+        logger.error(
+            "Kaggle kernel produced no training_metrics.json/training_log.json -- "
+            "training did not run successfully. Failing so this isn't mistaken for a completed run."
+        )
+        sys.exit(1)
+
+
 def _downsample(points: list[dict], max_points: int) -> list[dict]:
     """Keep at most max_points entries, always including the first and last."""
     if len(points) <= max_points:
@@ -224,6 +245,8 @@ def main() -> None:
 
     if training_log:
         _render_loss_curve_plot(training_log, RESULTS_DIR / "loss_curve.png")
+
+    assert_real_training_occurred(summary)
 
 
 if __name__ == "__main__":

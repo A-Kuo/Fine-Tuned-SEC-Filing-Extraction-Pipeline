@@ -142,7 +142,7 @@ def format_dataset(
             fout.write(json.dumps(formatted) + "\n")
             count += 1
 
-    logger.info(f"Formatted {count} examples → {output_path}")
+    logger.info(f"Formatted {count} examples -> {output_path}")
     return count
 
 
@@ -209,7 +209,7 @@ def main():
     output_path = Path(args.output) if args.output else input_path.with_suffix(f".{args.format}.jsonl")
 
     count = format_dataset(input_path, output_path, args.format, args.max_samples)
-    console.print(f"\n[bold green][OK][/bold green] Formatted {count} examples → {output_path}")
+    console.print(f"\n[bold green][OK][/bold green] Formatted {count} examples -> {output_path}")
 
     if args.validate:
         validate_formatted_data(output_path, args.format)

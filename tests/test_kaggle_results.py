@@ -13,7 +13,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from scripts.fetch_kaggle_results import build_metrics_summary, _downsample
+from scripts.fetch_kaggle_results import build_metrics_summary, _downsample, assert_real_training_occurred
 
 
 def _log(n: int) -> list[dict]:
@@ -137,6 +137,27 @@ class TestDownsample:
 
     def test_empty_points(self):
         assert _downsample([], 50) == []
+
+
+class TestAssertRealTrainingOccurred:
+    """Regression coverage for the silent-fake-success bug: a crashed Kaggle
+    kernel (e.g. missing training data) used to produce an all-null
+    metrics.json and exit 0, letting kaggle_training.yml's commit step land
+    a hollow result under a green checkmark."""
+
+    def test_raises_systemexit_when_note_present(self):
+        summary = {"status": "complete", "note": "training_metrics.json/training_log.json not found in kernel output"}
+        with pytest.raises(SystemExit) as exc_info:
+            assert_real_training_occurred(summary)
+        assert exc_info.value.code == 1
+
+    def test_no_exit_when_real_metrics_present(self):
+        summary = build_metrics_summary(
+            {"train_loss": 0.42, "train_runtime": 500.0}, _log(67),
+            status="complete", kernel_slug="u/s", git_commit_sha="abc123",
+        )
+        assert "note" not in summary
+        assert_real_training_occurred(summary)  # must not raise
 
 
 if __name__ == "__main__":

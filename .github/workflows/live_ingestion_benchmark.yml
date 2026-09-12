@@ -1,0 +1,119 @@
+# Produces real evidence for three README-flagged gaps that local Docker
+# Desktop being broken in this project's dev environment has blocked:
+#   1. scripts/smoke_test.py -- a real API+Redis+PostgreSQL /extract request
+#      (designed to pass even without GPU/HF_TOKEN -- a graceful degraded
+#      response is an accepted outcome, only a 5xx/hang/crash fails it).
+#   2. db/sync/transfer_metrics.py --benchmark -- real ingestion throughput
+#      against a live Postgres.
+#   3. evaluation/benchmark_redis_cache.py -- real warm-vs-cold cache
+#      latency (previously zero timing instrumentation existed anywhere in
+#      the repo for this).
+#
+# GitHub's ubuntu-latest runners have Docker working natively (no Docker
+# Desktop involved), unlike this project's local dev machine.
+#
+# Results are uploaded as a workflow artifact only -- NOT auto-committed to
+# main (unlike kaggle_training.yml's precedent), so a human reviews the
+# numbers before they land in README.md or evaluation/results/.
+
+name: Live Ingestion Benchmark
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [main]
+    paths:
+      - "scripts/smoke_test.py"
+      - "db/sync/transfer_metrics.py"
+      - "evaluation/benchmark_redis_cache.py"
+      - "src/storage/database.py"
+      - "docker/docker-compose.smoke.yml"
+      - "scripts/init_normalized_schema.sql"
+      - "scripts/init_db.sql"
+      - ".github/workflows/live_ingestion_benchmark.yml"
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements-ci.txt') }}
+          restore-keys: ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-ci.txt
+
+      - name: Docker smoke test (self-contained -- builds/starts/tears down its own stack)
+        run: python scripts/smoke_test.py
+
+      - name: Start postgres + redis for the ingestion/cache benchmarks
+        run: docker compose -f docker/docker-compose.smoke.yml up -d postgres redis
+
+      - name: Wait for postgres + redis to be healthy
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 40); do
+            pg_health=$(docker inspect --format='{{.State.Health.Status}}' $(docker compose -f docker/docker-compose.smoke.yml ps -q postgres) 2>/dev/null || echo "starting")
+            redis_health=$(docker inspect --format='{{.State.Health.Status}}' $(docker compose -f docker/docker-compose.smoke.yml ps -q redis) 2>/dev/null || echo "starting")
+            echo "postgres=$pg_health redis=$redis_health"
+            if [ "$pg_health" = "healthy" ] && [ "$redis_health" = "healthy" ]; then
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "::error::postgres/redis did not become healthy in time"
+          exit 1
+
+      - name: Real ingestion throughput benchmark
+        env:
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: "5432"
+          POSTGRES_USER: finllm
+          POSTGRES_PASSWORD: finllm_dev
+          POSTGRES_DB: financial_llm
+        run: python db/sync/transfer_metrics.py --benchmark --records 200000
+
+      - name: Real Redis cache warm-vs-cold benchmark
+        env:
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: "5432"
+          POSTGRES_USER: finllm
+          POSTGRES_PASSWORD: finllm_dev
+          POSTGRES_DB: financial_llm
+          REDIS_HOST: localhost
+          REDIS_PORT: "6379"
+        run: python evaluation/benchmark_redis_cache.py
+
+      - name: Clean up benchmark rows
+        if: always()
+        env:
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: "5432"
+          POSTGRES_USER: finllm
+          POSTGRES_PASSWORD: finllm_dev
+          POSTGRES_DB: financial_llm
+        run: python db/sync/transfer_metrics.py --cleanup
+
+      - name: Tear down postgres + redis
+        if: always()
+        run: docker compose -f docker/docker-compose.smoke.yml down -v
+
+      - name: Upload benchmark results (review before committing to evaluation/results/)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-ingestion-benchmark-results
+          path: evaluation/results/*.json
+          retention-days: 30

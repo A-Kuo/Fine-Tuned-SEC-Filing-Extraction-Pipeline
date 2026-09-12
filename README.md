@@ -20,6 +20,8 @@ This repo sits **downstream** of EDGAR/iXBRL ingestion: it consumes filing text 
 ## Table of Contents
 
 - [Overview](#project-overview)
+  - [Why SEC EDGAR](#why-sec-edgar)
+  - [Human-in-the-Loop by Design](#human-in-the-loop-by-design)
 - [Architecture](#architecture)
 - [Model and Fine-Tuning Approach](#model-and-fine-tuning-approach)
 - [Extraction Output](#extraction-output)
@@ -43,6 +45,16 @@ SEC filings are only partially structured. Even when companies provide iXBRL tag
 The system combines a QLoRA fine-tuned Llama 3.1 8B model with a 5-stage JSON fallback parser, schema validation, Redis caching, PostgreSQL persistence, and FastAPI endpoints for online and batch inference. See [Evidence and Benchmarks](#evidence-and-benchmarks) for exactly which numbers are real, measured results (467 automated tests, 100% schema conformance across 6 filings, measured parser-recovery rates, a real Tesla T4 model-load benchmark) versus unverified targets.
 
 This repo is best understood as the untagged-prose extraction layer in a broader SEC data stack: deterministic systems handle machine-tagged facts upstream, and this pipeline handles the ambiguous text that remains.
+
+### Why SEC EDGAR
+
+SEC filings are the one financial disclosure corpus that is simultaneously (a) legally mandated — every US public company must file 10-Ks, 10-Qs, and 8-Ks under the Securities Exchange Act of 1934, so coverage is comprehensive rather than opt-in — and (b) freely, publicly accessible via SEC EDGAR's own APIs (`data.sec.gov`), with no paywall or commercial-vendor licensing barrier. That combination is what makes it viable as a research and portfolio dataset at all.
+
+The more specific reason this repo exists: iXBRL tagging already covers core financial-statement line items (revenue, net income, balance-sheet figures) in a fully structured, machine-readable form — see [`docs/BOUNDARY.md`](docs/BOUNDARY.md) for the companion pipeline that owns that tagged layer. But a large and consequential share of what a filing actually discloses — MD&A narrative, risk factors, footnote detail, non-GAAP reconciliations — is never tagged, because XBRL's taxonomy doesn't cover free-form prose. That untagged remainder is exactly what deterministic parsers can't reach and what this repo's dual-track (XBRL-precedence + heuristic + LLM) extraction targets. The research question this repo answers is narrow and concrete: can a small, fine-tuned open model extract structured facts from that untagged prose reliably enough to be useful *alongside* — never instead of — the tagged ground truth.
+
+### Human-in-the-Loop by Design
+
+This is not a footnote — it's load-bearing in the schema itself. Every extracted fact carries a `method` label (`xbrl` / `heuristic` / `llm`) and a `confidence` score (see [`db/SCHEMA.md`](db/SCHEMA.md)), and the merge rule enforced at the database layer is that an `llm`-derived fact can never silently overwrite an `xbrl`-derived one for the same key (`docs/BOUNDARY.md`'s precedence rule). That provenance tagging is what makes human review tractable: a downstream consumer or reviewer can filter to exactly the facts that came from the fine-tuned model rather than deterministic parsing, and weigh them accordingly, instead of treating every number in the database as equally trustworthy. Per [`MODEL_CARD.md`](MODEL_CARD.md#responsible-use), critical financial decisions should still validate LLM-derived extractions against primary sources — the confidence/method columns exist specifically to make that validation targeted rather than all-or-nothing.
 
 ### Repository Layout
 
