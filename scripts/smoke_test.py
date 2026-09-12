@@ -144,6 +144,14 @@ def main():
         except TimeoutError as e:
             record("all services healthy", False, str(e))
             overall_ok = False
+            # Without this, a timeout gives no signal on WHY the api
+            # container never became healthy (still importing heavy ML
+            # deps vs. actually crashed) -- container logs are the only way
+            # to tell those apart, and this was previously undiagnosable
+            # from the smoke test's own report.
+            for service in ("api", "postgres", "redis"):
+                logs = compose("logs", "--no-color", "--tail", "200", service, capture_output=True, text=True)
+                record(f"container logs: {service}", True, logs.stdout[-4000:] + logs.stderr[-4000:])
 
         if overall_ok:
             status, body = http_get("/health")

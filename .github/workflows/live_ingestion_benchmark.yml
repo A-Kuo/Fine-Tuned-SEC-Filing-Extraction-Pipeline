@@ -56,7 +56,12 @@ jobs:
           pip install -r requirements-ci.txt
 
       - name: Docker smoke test (self-contained -- builds/starts/tears down its own stack)
-        run: python scripts/smoke_test.py
+        # Default --timeout (240s) was measured too short on a GitHub-hosted
+        # runner: building the full requirements.txt image (torch,
+        # transformers, etc.) alone took ~7 minutes, and the api container's
+        # own heavy imports need time on top of that before its healthcheck
+        # can pass. 600s gives real headroom instead of guessing further.
+        run: python scripts/smoke_test.py --timeout 600
 
       - name: Start postgres + redis for the ingestion/cache benchmarks
         run: docker compose -f docker/docker-compose.smoke.yml up -d postgres redis
