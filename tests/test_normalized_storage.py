@@ -242,5 +242,42 @@ class TestEmbeddingMethods:
         assert "embedding IS NULL" in sql
 
 
+class TestLogExtractionRun:
+    """intel.extraction_runs.metadata existed since the table's creation but
+    had no writer -- these confirm log_extraction_run() now populates it
+    (e.g. with ParseTelemetry.to_dict(), the 5-stage JSON-recovery cascade's
+    trace) rather than always writing the column's bare '{}' default."""
+
+    def test_writes_metadata_as_jsonb(self):
+        storage = _make_storage()
+        mock_cursor = MagicMock()
+        storage._connection.cursor = MagicMock(return_value=mock_cursor)
+
+        storage.log_extraction_run(
+            "f-1", pipeline_version="v1", status="success",
+            sections_found=3, metrics_found=2, risk_factors_found=1,
+            duration_ms=100, metadata={"parser_telemetry": [{"winning_stage": "direct"}]},
+        )
+
+        params = mock_cursor.execute.call_args[0][1]
+        assert '"winning_stage": "direct"' in params[-1]
+
+    def test_defaults_metadata_to_empty_object(self):
+        """No metadata passed (existing callers) -- must write '{}', not
+        NULL or crash, since the column is NOT NULL."""
+        storage = _make_storage()
+        mock_cursor = MagicMock()
+        storage._connection.cursor = MagicMock(return_value=mock_cursor)
+
+        storage.log_extraction_run(
+            "f-1", pipeline_version="v1", status="success",
+            sections_found=0, metrics_found=0, risk_factors_found=0,
+            duration_ms=0,
+        )
+
+        params = mock_cursor.execute.call_args[0][1]
+        assert params[-1] == "{}"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

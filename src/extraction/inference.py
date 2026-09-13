@@ -35,6 +35,7 @@ from src.extraction.postprocessing import (
     ExtractionResult,
     ValidationError,
 )
+from src.extraction.parser_telemetry import ParseTelemetry
 
 
 # ─── System prompt matching training format ──────────────────────────────────
@@ -72,6 +73,7 @@ class ExtractionResponse:
     status: str  # 'success', 'validation_error', 'parse_error', 'timeout'
     error: str | None = None
     confidence_score: float = 0.0
+    telemetry: "ParseTelemetry | None" = None
 
 
 class ExtractionEngine:
@@ -144,7 +146,8 @@ class ExtractionEngine:
             )
 
             # Step 4: Parse JSON
-            extraction = parse_extraction(raw_output)
+            telemetry = ParseTelemetry(raw_output_chars=len(raw_output))
+            extraction = parse_extraction(raw_output, telemetry=telemetry)
 
             # Step 5: Validate
             is_valid, errors = validate_extraction(extraction)
@@ -158,6 +161,7 @@ class ExtractionEngine:
                     status="validation_error",
                     error=f"Validation failed: {'; '.join(errors)}",
                     confidence_score=self._estimate_confidence(extraction, errors),
+                    telemetry=telemetry,
                 )
 
             # Step 6: Confidence score
@@ -176,6 +180,7 @@ class ExtractionEngine:
                 model_version=self.model.model_version,
                 status="success",
                 confidence_score=confidence,
+                telemetry=telemetry,
             )
 
         except json.JSONDecodeError as e:
@@ -187,6 +192,7 @@ class ExtractionEngine:
                 model_version=self.model.model_version if self.model else "unknown",
                 status="parse_error",
                 error=f"JSON parse failed: {str(e)}",
+                telemetry=telemetry if "telemetry" in dir() else None,
             )
 
         except Exception as e:
@@ -230,7 +236,8 @@ class ExtractionEngine:
             indexed_requests, raw_results
         ):
             try:
-                extraction = parse_extraction(raw_output)
+                telemetry = ParseTelemetry(raw_output_chars=len(raw_output))
+                extraction = parse_extraction(raw_output, telemetry=telemetry)
                 is_valid, errors = validate_extraction(extraction)
 
                 status = "success" if is_valid else "validation_error"
@@ -247,6 +254,7 @@ class ExtractionEngine:
                     status=status,
                     error=f"Validation: {'; '.join(errors)}" if errors else None,
                     confidence_score=confidence,
+                    telemetry=telemetry,
                 )
             except Exception as e:
                 responses[orig_idx] = ExtractionResponse(

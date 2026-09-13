@@ -231,20 +231,31 @@ class NormalizedStorage:
         risk_factors_found: int,
         duration_ms: int,
         error_message: str | None = None,
+        metadata: dict | None = None,
     ) -> bool:
+        """metadata populates the jsonb column that existed on this table
+        since it was first created but was never written to by any caller
+        -- e.g. {"parser_telemetry": [ParseTelemetry.to_dict(), ...]}, the
+        5-stage JSON-recovery cascade's per-section trace (see
+        src/extraction/parser_telemetry.py). Empty by default so existing
+        callers that don't have telemetry to report don't need to change.
+        """
         if not self._available:
             return False
         try:
+            import json as _json
+
             cur = self._connection.cursor()
             cur.execute(
                 """
                 INSERT INTO intel.extraction_runs (
                     filing_id, pipeline_version, status, sections_found,
-                    metrics_found, risk_factors_found, error_message, duration_ms
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    metrics_found, risk_factors_found, error_message, duration_ms, metadata
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
                 """,
                 (filing_id, pipeline_version, status, sections_found, metrics_found,
-                 risk_factors_found, error_message, duration_ms),
+                 risk_factors_found, error_message, duration_ms,
+                 _json.dumps(metadata or {})),
             )
             return True
         except Exception as e:

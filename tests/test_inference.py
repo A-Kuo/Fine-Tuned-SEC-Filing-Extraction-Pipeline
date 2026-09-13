@@ -31,6 +31,45 @@ def _make_engine(chat_template):
     return ExtractionEngine(model=model)
 
 
+def _make_full_engine(raw_output: str):
+    """A fake with a working .generate() too, for exercising extract() end
+    to end (not just prompt-building)."""
+    tokenizer = SimpleNamespace(chat_template=None)
+    model = SimpleNamespace(
+        tokenizer=tokenizer,
+        model_version="fake-v1",
+        generate=lambda prompt, max_tokens=512: (raw_output, 1.0),
+    )
+    return ExtractionEngine(model=model)
+
+
+class TestExtractTelemetry:
+    """extract() must attach ParseTelemetry to every ExtractionResponse it
+    returns -- previously there was no way to tell, from the response
+    alone, which of the 5 fallback-parser stages actually recovered a
+    result (see src/extraction/parser_telemetry.py)."""
+
+    def test_direct_json_success_reports_winning_stage(self):
+        engine = _make_full_engine('{"company_name": "Apple", "filing_type": "10-K", "date": "2024-01-01", "filing_id": "f-1"}')
+        from src.extraction.inference import ExtractionRequest
+
+        response = engine.extract(ExtractionRequest(text="irrelevant"))
+
+        assert response.telemetry is not None
+        assert response.telemetry.winning_stage == "direct"
+
+    def test_parse_error_still_carries_telemetry(self):
+        engine = _make_full_engine("complete garbage, no structure whatsoever")
+        from src.extraction.inference import ExtractionRequest
+
+        response = engine.extract(ExtractionRequest(text="irrelevant"))
+
+        assert response.status == "parse_error"
+        assert response.telemetry is not None
+        assert response.telemetry.winning_stage is None
+        assert len(response.telemetry.attempts) > 0
+
+
 class TestBuildPrompt:
     def test_uses_chat_template_when_present(self):
         engine = _make_engine(chat_template="{% chat template %}")

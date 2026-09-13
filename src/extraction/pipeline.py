@@ -66,12 +66,22 @@ def extract_llm_metrics(
     engine: "ExtractionEngine",
     filing_id: str | None = None,
     source_section: str | None = None,
+    telemetry_sink: list[dict] | None = None,
 ) -> list[MetricRecord]:
     """Run architecture A's ExtractionEngine over section text and adapt the
-    flat ExtractionResult into normalized MetricRecords (method='llm')."""
+    flat ExtractionResult into normalized MetricRecords (method='llm').
+
+    telemetry_sink: when given, response.telemetry.to_dict() is appended to
+    it (skipped if the response carries no telemetry, e.g. a stub/mock
+    engine in tests). Output-parameter rather than changing this function's
+    return type, so existing callers/tests comparing the result directly to
+    a plain list of MetricRecords don't need to change.
+    """
     from src.extraction.inference import ExtractionRequest
 
     response = engine.extract(ExtractionRequest(text=section_text, filing_id=filing_id))
+    if telemetry_sink is not None and response.telemetry is not None:
+        telemetry_sink.append(response.telemetry.to_dict())
     if response.result is None:
         return []
     return extraction_result_to_metrics(
@@ -130,6 +140,7 @@ def build_filing_record(
                 )
             )
 
+    parser_telemetry: list[dict] = []
     if engine is not None:
         llm_metrics: list[MetricRecord] = []
         for s in sections:
@@ -140,6 +151,7 @@ def build_filing_record(
                         engine=engine,
                         filing_id=filing_id,
                         source_section=s.section_type,
+                        telemetry_sink=parser_telemetry,
                     )
                 )
 
@@ -171,4 +183,5 @@ def build_filing_record(
         metrics=metrics,
         risk_factors=risk_factors,
         mdna=mdna,
+        parser_telemetry=parser_telemetry,
     )

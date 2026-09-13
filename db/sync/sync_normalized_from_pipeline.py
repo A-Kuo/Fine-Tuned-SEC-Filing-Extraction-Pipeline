@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).parent.parent.parent
@@ -71,6 +72,7 @@ def main():
     written, failed = 0, 0
     try:
         for case in corpus:
+            start = time.time()
             record = build_filing_record(
                 case["text"],
                 filing_id=case["filing_id"],
@@ -80,6 +82,27 @@ def main():
                 filing_date=case.get("filing_date"),
             )
             ok = storage.save_filing_record(record)
+            duration_ms = int((time.time() - start) * 1000)
+
+            # record.parser_telemetry is empty here: this script never passes
+            # an `engine` to build_filing_record() (no GPU in this
+            # environment), so the LLM extraction path -- the only thing that
+            # generates ParseTelemetry -- never runs. The column is still
+            # worth writing on every run so intel.extraction_runs reflects
+            # reality (empty metadata, not a missing row), and so this
+            # becomes real data automatically once a run does pass a loaded
+            # engine.
+            storage.log_extraction_run(
+                case["filing_id"],
+                pipeline_version="sync_normalized_from_pipeline-v1",
+                status="success" if ok else "failed",
+                sections_found=len(record.sections),
+                metrics_found=len(record.metrics),
+                risk_factors_found=len(record.risk_factors),
+                duration_ms=duration_ms,
+                metadata={"parser_telemetry": record.parser_telemetry},
+            )
+
             if ok:
                 written += 1
                 logger.info(f"Synced {case['filing_id']} ({case['corpus']}) to intel.*")

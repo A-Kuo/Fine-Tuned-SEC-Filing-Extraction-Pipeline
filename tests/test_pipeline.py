@@ -34,10 +34,11 @@ class StubExtractionEngine:
     """Duck-typed stand-in for ExtractionEngine -- no model load required."""
 
     def __init__(self, result: ExtractionResult, model_version: str = "stub-v1",
-                 confidence: float = 0.8):
+                 confidence: float = 0.8, telemetry=None):
         self._result = result
         self._model_version = model_version
         self._confidence = confidence
+        self._telemetry = telemetry
         self.calls: list[ExtractionRequest] = []
 
     def extract(self, request: ExtractionRequest) -> ExtractionResponse:
@@ -49,6 +50,7 @@ class StubExtractionEngine:
             model_version=self._model_version,
             status="success",
             confidence_score=self._confidence,
+            telemetry=self._telemetry,
         )
 
 
@@ -131,6 +133,39 @@ class TestExtractLlmMetrics:
         engine = StubExtractionEngine(None)
         assert extract_llm_metrics("text", engine=engine) == []
 
+    def test_telemetry_sink_receives_dict_when_response_has_telemetry(self):
+        from src.extraction.parser_telemetry import ParseTelemetry
+
+        telemetry = ParseTelemetry(winning_stage="direct", raw_output_chars=42)
+        result = ExtractionResult(revenue="$5 million")
+        engine = StubExtractionEngine(result, telemetry=telemetry)
+
+        sink: list[dict] = []
+        extract_llm_metrics("text", engine=engine, telemetry_sink=sink)
+
+        assert len(sink) == 1
+        assert sink[0]["winning_stage"] == "direct"
+
+    def test_telemetry_sink_untouched_when_response_has_no_telemetry(self):
+        """Existing callers (e.g. a mock engine in a test that never sets
+        telemetry) must not crash extract_llm_metrics -- response.telemetry
+        defaults to None."""
+        result = ExtractionResult(revenue="$5 million")
+        engine = StubExtractionEngine(result)  # no telemetry passed
+
+        sink: list[dict] = []
+        extract_llm_metrics("text", engine=engine, telemetry_sink=sink)
+
+        assert sink == []
+
+    def test_no_sink_given_is_a_no_op(self):
+        """Default telemetry_sink=None -- existing callers that don't pass
+        it must be unaffected."""
+        result = ExtractionResult(revenue="$5 million")
+        engine = StubExtractionEngine(result)
+        metrics = extract_llm_metrics("text", engine=engine)
+        assert len(metrics) == 1
+
 
 class TestBuildFilingRecordWithEngine:
     def test_llm_metrics_merged_in(self):
@@ -145,6 +180,26 @@ class TestBuildFilingRecordWithEngine:
         assert len(net_income_metrics) == 1
         assert net_income_metrics[0].method == "llm"
         assert net_income_metrics[0].model_version == "llama-sec-v1"
+
+    def test_parser_telemetry_populated_from_llm_calls(self):
+        from src.extraction.parser_telemetry import ParseTelemetry
+
+        telemetry = ParseTelemetry(winning_stage="fence_strip", raw_output_chars=10)
+        result = ExtractionResult(revenue="$999 million")
+        engine = StubExtractionEngine(result, telemetry=telemetry)
+
+        record = build_filing_record(
+            SAMPLE_FILING, filing_id="f-1", filing_type="10-K", engine=engine
+        )
+
+        assert len(record.parser_telemetry) >= 1
+        assert record.parser_telemetry[0]["winning_stage"] == "fence_strip"
+
+    def test_parser_telemetry_empty_without_engine(self):
+        """No engine passed -- the LLM path never runs, so there is no
+        telemetry to report. Must be an empty list, not None/missing."""
+        record = build_filing_record(SAMPLE_FILING, filing_id="f-1", filing_type="10-K")
+        assert record.parser_telemetry == []
 
     def test_llm_overwrites_heuristic_for_same_key_last_write_wins(self):
         """Both the heuristic 'revenue' guess and the LLM 'revenue' guess share

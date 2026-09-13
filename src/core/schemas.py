@@ -55,3 +55,9 @@ class FilingRecord(BaseModel):
     metrics: list[MetricRecord]
     risk_factors: list[RiskFactorRecord]
     mdna: MdnaSummaryRecord | None = None
+    # One ParseTelemetry.to_dict() per LLM extraction call build_filing_record()
+    # made (one per mdna/financial_statements section run through the model)
+    # -- empty when no engine was passed, since the LLM path never ran.
+    # Persisted into intel.extraction_runs.metadata, a column that existed
+    # since the table's own creation but had no writer until this.
+    parser_telemetry: list[dict] = Field(default_factory=list)
