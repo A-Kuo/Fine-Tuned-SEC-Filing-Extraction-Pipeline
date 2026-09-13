@@ -15,11 +15,19 @@
   <section class="panel" id="connection-panel">
     <h2>Backend connection</h2>
     <div class="row">
+      <label for="backend-mode">Mode</label>
+      <select id="backend-mode">
+        <option value="direct">Direct FastAPI (serving/api.py, e.g. local/Docker)</option>
+        <option value="sagemaker">SageMaker via proxy (frontend/api/, production)</option>
+      </select>
+    </div>
+    <div class="row" id="direct-mode-row">
       <label for="api-base">API base URL</label>
       <input type="text" id="api-base" placeholder="http://localhost:8000" />
       <button id="save-api-base">Save</button>
       <button id="check-health">Check /health</button>
     </div>
+    <p class="hint" id="sagemaker-mode-hint" hidden>/extract and /rag/query will go through this same origin's <code>/api/invoke</code> + <code>/api/status</code> proxy (see <code>frontend/api/</code>), which forwards to a SageMaker Async Inference endpoint. /stats and /pipeline/status have no SageMaker equivalent -- they still need a direct FastAPI backend.</p>
     <pre id="health-output" class="output" hidden></pre>
   </section>
 

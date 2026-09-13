@@ -11,6 +11,10 @@
 }
 
 * { box-sizing: border-box; }
+/* Must outrank any class-based `display` rule (e.g. .row{display:flex}) --
+   without !important here, toggling el.hidden=true silently does nothing
+   on any element whose class also sets `display`. */
+[hidden] { display: none !important; }
 
 body {
   margin: 0;

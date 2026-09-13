@@ -1,0 +1,4 @@
+# Dependencies for frontend/api/*.py (the SageMaker proxy functions).
+# Vercel installs this for the project rooted at frontend/ -- deliberately
+# tiny (boto3 only), nowhere near the model-serving stack's dependencies.
+boto3>=1.34.0
