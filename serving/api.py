@@ -1,7 +1,9 @@
 """FastAPI REST API for SEC Filing Extraction.
 
+ Extraction runs behind FastAPI, the endpoints are observable, and Redis caching avoids repeatedly paying for the same work
+
 Endpoints:
-    POST /extract                 - Single document extraction
+    POST /extract                 - Single document extraction 
     POST /extract/batch           - Batch extraction (up to 32 docs)
     GET  /health                  - Health check + model status
     GET  /metrics                 - Prometheus text exposition format

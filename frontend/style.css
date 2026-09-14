@@ -49,6 +49,16 @@ label {
   margin: 10px 0 4px;
 }
 
+select {
+  padding: 8px 10px;
+  background: #0d0f13;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 0.85rem;
+}
+
 input[type="text"], input[type="number"], textarea {
   width: 100%;
   padding: 8px 10px;
@@ -85,6 +95,38 @@ button:active { filter: brightness(0.95); }
 
 .row input { flex: 1; min-width: 200px; margin-top: 0; }
 .row label { margin: 0; white-space: nowrap; }
+.row select { margin-top: 0; }
+.row input[type="number"] { flex: none; width: 90px; }
+
+.data-table-wrap {
+  margin-top: 12px;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.data-table th, .data-table td {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+
+.data-table th {
+  background: #0d0f13;
+  color: var(--muted);
+  position: sticky;
+  top: 0;
+}
+
+.data-table tr:hover td { background: rgba(255, 255, 255, 0.03); }
 
 .output {
   margin-top: 12px;

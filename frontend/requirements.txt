@@ -1,4 +1,5 @@
-# Dependencies for frontend/api/*.py (the SageMaker proxy functions).
-# Vercel installs this for the project rooted at frontend/ -- deliberately
-# tiny (boto3 only), nowhere near the model-serving stack's dependencies.
-boto3>=1.34.0
+# Dependencies for frontend/api/*.py. Vercel installs this for the
+# project rooted at frontend/ -- deliberately tiny, nowhere near the
+# model-serving stack's dependencies.
+boto3>=1.34.0          # invoke.py, status.py -- SageMaker proxy
+psycopg2-binary>=2.9.9  # query_supabase.py -- read-only Supabase browser

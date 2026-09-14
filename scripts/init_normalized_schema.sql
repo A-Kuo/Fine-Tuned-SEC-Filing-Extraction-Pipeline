@@ -57,6 +57,9 @@ CREATE TABLE IF NOT EXISTS intel.financial_metrics (
     source_section VARCHAR(50),
     evidence_text TEXT,
     model_version VARCHAR(50),
+    prompt_version VARCHAR(64),
+    parser_version VARCHAR(64),
+    dataset_version VARCHAR(128),
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE (filing_id, metric_name, period, segment)
@@ -79,6 +82,8 @@ CREATE TABLE IF NOT EXISTS intel.mdna_summaries (
     summary TEXT NOT NULL,
     method VARCHAR(10) NOT NULL DEFAULT 'heuristic' CHECK (method IN ('heuristic', 'llm')),
     model_version VARCHAR(50),
+    prompt_version VARCHAR(64),
+    parser_version VARCHAR(64),
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -92,6 +97,14 @@ CREATE TABLE IF NOT EXISTS intel.extraction_runs (
     risk_factors_found INTEGER,
     error_message TEXT,
     duration_ms INTEGER,
+    prompt_version VARCHAR(64),
+    parser_version VARCHAR(64),
+    dataset_version VARCHAR(128),
+    -- Written by NormalizedStorage.log_extraction_run()'s metadata param
+    -- (e.g. {"parser_telemetry": [...]}, the 5-stage JSON-recovery
+    -- cascade's trace -- see src/extraction/parser_telemetry.py). Declared
+    -- since this table's creation but had no writer until this session.
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 

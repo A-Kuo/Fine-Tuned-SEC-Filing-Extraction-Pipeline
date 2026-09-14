@@ -206,3 +206,62 @@ document.getElementById("pipeline-refresh").addEventListener("click", async () =
   const { ok, status, body } = await apiFetch("/pipeline/status");
   showOutput(out, { status, body }, !ok);
 });
+
+// --- Supabase browser ---
+// Talks to this same origin's /api/query_supabase (frontend/api/), NOT
+// through apiFetch/getApiBase -- this proxy connects directly to
+// Supabase's Postgres via Vercel's injected connection string, unrelated
+// to the direct-FastAPI-vs-SageMaker mode toggle above. Only works once
+// deployed to Vercel with the Supabase integration connected.
+
+function renderDataTable(container, columns, rows) {
+  if (rows.length === 0) {
+    container.innerHTML = "<p class=\"hint\">0 rows.</p>";
+    return;
+  }
+  const escape = (s) => String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+  const thead = `<tr>${columns.map((c) => `<th>${escape(c)}</th>`).join("")}</tr>`;
+  const tbody = rows.map((row) =>
+    `<tr>${row.map((v) => `<td>${v === null ? "<em>null</em>" : escape(v)}</td>`).join("")}</tr>`
+  ).join("");
+  container.innerHTML = `<div class="data-table-wrap"><table class="data-table"><thead>${thead}</thead><tbody>${tbody}</tbody></table></div>`;
+}
+
+async function loadSupabaseTables() {
+  const select = document.getElementById("supabase-table");
+  try {
+    const resp = await fetch("/api/query_supabase");
+    const body = await resp.json();
+    if (!resp.ok) throw new Error(body.error || `HTTP ${resp.status}`);
+    select.innerHTML = body.tables.map((t) => `<option value="${t}">${t}</option>`).join("");
+  } catch (e) {
+    select.innerHTML = "<option value=\"\">(unavailable)</option>";
+    const errOut = document.getElementById("supabase-error-output");
+    showOutput(errOut, `Could not load table list: ${e.message}`, true);
+  }
+}
+loadSupabaseTables();
+
+document.getElementById("supabase-load").addEventListener("click", async () => {
+  const table = document.getElementById("supabase-table").value;
+  const limit = document.getElementById("supabase-limit").value || "50";
+  const tableOut = document.getElementById("supabase-table-output");
+  const errOut = document.getElementById("supabase-error-output");
+  errOut.hidden = true;
+  tableOut.innerHTML = "<p class=\"hint\">Loading...</p>";
+
+  if (!table) {
+    tableOut.innerHTML = "";
+    return showOutput(errOut, "No table selected (table list may have failed to load -- see above)", true);
+  }
+
+  try {
+    const resp = await fetch(`/api/query_supabase?table=${encodeURIComponent(table)}&limit=${encodeURIComponent(limit)}`);
+    const body = await resp.json();
+    if (!resp.ok) throw new Error(body.error || `HTTP ${resp.status}`);
+    renderDataTable(tableOut, body.columns, body.rows);
+  } catch (e) {
+    tableOut.innerHTML = "";
+    showOutput(errOut, e.message, true);
+  }
+});

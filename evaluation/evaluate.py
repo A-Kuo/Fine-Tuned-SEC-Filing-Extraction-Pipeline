@@ -230,7 +230,9 @@ def evaluate_dataset(
         "fully_correct": fully_correct,
     }
 
-
+'''
+Some headline figures were foudn to be specification targets, not measured findings
+'''
 def generate_sample_metrics() -> dict:
     """Generate realistic sample metrics for README and dashboard.
 
