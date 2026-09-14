@@ -927,8 +927,19 @@ if __name__ == "__main__":
     import uvicorn
 
     config = load_config()
+    # Pass the already-constructed `app` object, not the "serving.api:app"
+    # string. The CMD this runs under (python -m serving.api, per the
+    # Dockerfile) makes this file execute as __main__ -- passing a string
+    # here makes uvicorn's import_from_string re-import it a second time
+    # under the *separate* module name "serving.api", re-running every
+    # top-level statement (including this file's module-level Counter/
+    # Histogram/Gauge registrations) against the shared global
+    # CollectorRegistry a second time: prometheus_client.registry.
+    # DuplicateTimeseries, crashing the container on every real run. The
+    # string form only matters for uvicorn's reload=True subprocess
+    # reloader, which this doesn't use.
     uvicorn.run(
-        "serving.api:app",
+        app,
         host=config["serving"]["host"],
         port=config["serving"]["port"],
         reload=False,
