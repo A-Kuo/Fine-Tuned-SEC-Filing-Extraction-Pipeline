@@ -251,9 +251,6 @@ The pipeline is designed to produce structured JSON from raw filing text. A typi
 ---
 
 ## Evidence and Benchmarks
-
-### ⚠️ Correction: the 94% / 92–99% numbers below were never measured
-
 `evaluation/evaluate.py`'s `generate_sample_metrics()` returns hardcoded values —
 its own docstring calls them "target results from the project spec." Running
 `evaluate.py` with no `--predictions`/`--ground_truth` used to silently fall back
