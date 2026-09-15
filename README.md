@@ -2,9 +2,7 @@
 
 **The untagged-prose extraction layer for SEC filings** — QLoRA fine-tuned Llama 3.1 8B, dual-track XBRL+LLM extraction, FastAPI serving. Fetches real filings from SEC EDGAR (`scripts/fetch_edgar.py`) and extracts structured data from the narrative prose that iXBRL tagging doesn't cover, alongside (not instead of) already-tagged XBRL facts. See [`docs/BOUNDARY.md`](docs/BOUNDARY.md) for the xbrl-vs-llm precedence rule this enforces.
 
-[![CI](https://github.com/A-Kuo/Fine-Tuned-SEC-Filing-Extraction-Pipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/A-Kuo/Fine-Tuned-SEC-Filing-Extraction-Pipeline/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/Python-3.12%2B-blue?logo=python&logoColor=blue&style=plastic)](https://www.python.org/downloads/release/python-3120/)
-[![MLOps](https://img.shields.io/badge/MLOps-Ubuntu-orange?logo=ubuntu&style=plastic)](https://ubuntu.com/engage/mlops-guide)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-18.6-608CC4?&logoColor=608CC4&logo=postgresql&style=plastic)](https://www.postgresql.org/docs/18/index.html)
 [![Hugging Face](https://img.shields.io/badge/Hugging%20Face-Transformers-yellow?logo=huggingface&style=plastic)](https://huggingface.co/transformers)
 [![License: MIT](https://img.shields.io/badge/License-MIT-red?style=plastic&logo=mit)](https://en.wikipedia.org/wiki/MIT_License)
