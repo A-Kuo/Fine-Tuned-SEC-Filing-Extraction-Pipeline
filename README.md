@@ -9,9 +9,9 @@
 
 > "SEC filings contain valuable financial data buried in narrative prose — MD&A sections, footnotes, non-GAAP reconciliations, and untagged tables — that no general-purpose parser can reliably handle. This pipeline extracts structured data from that untagged text."
 
-This repo sits **downstream** of EDGAR/iXBRL ingestion: it consumes filing text (and, where available, tagged XBRL facts) and extracts structured data from the untagged prose those facts don't cover, while preserving confidence, provenance, and model versioning.
+This repo sits downstream of EDGAR/iXBRL ingestion: it consumes filing text (and, where available, tagged XBRL facts) and extracts structured data from the untagged prose those facts don't cover, while preserving confidence, provenance, and model versioning.
 
-> **Every claim in this README is tagged implemented / benchmarked / proposed**, with file:line or artifact citations — see [Evidence and Benchmarks](#evidence-and-benchmarks) below.
+<img width="721" height="557" alt="image" src="https://github.com/user-attachments/assets/ad5936af-71c3-4e45-8c4d-98b097b60ee8" />
 
 ---
 
