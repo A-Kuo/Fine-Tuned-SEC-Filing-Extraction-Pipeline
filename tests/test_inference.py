@@ -43,6 +43,66 @@ def _make_full_engine(raw_output: str):
     return ExtractionEngine(model=model)
 
 
+class TestModelLoadFailureDegradesGracefully:
+    """Regression coverage for a real bug found via scripts/smoke_test.py
+    in CI: initialize() used to sit outside extract()'s own try/except (and
+    entirely unguarded in extract_batch()), so a model-load failure (e.g. a
+    HuggingFace 401 on a gated repo with no HF_TOKEN, exactly what happened
+    in that real CI run) propagated straight out of both methods uncaught.
+    serving/api.py's run_extraction() then turned that into a raw
+    HTTPException(500) -- precisely the outcome scripts/smoke_test.py's own
+    docstring says a missing/unavailable model must NOT produce (a 5xx);
+    only a graceful degraded response is acceptable."""
+
+    @staticmethod
+    def _install_fake_model_module(monkeypatch, error_message: str):
+        """initialize() does `from src.extraction.model import FinancialLLM`
+        -- the real module imports peft/torch, not installed in this test
+        environment (matches every other model-adjacent test in this repo).
+        Inject a fake module into sys.modules instead of importing the real
+        one, so this exercises extract()'s/extract_batch()'s own error
+        handling without needing those heavy deps."""
+        import sys
+        from types import ModuleType
+
+        class _FakeFinancialLLM:
+            @staticmethod
+            def from_config():
+                raise OSError(error_message)
+
+        fake_module = ModuleType("src.extraction.model")
+        fake_module.FinancialLLM = _FakeFinancialLLM
+        monkeypatch.setitem(sys.modules, "src.extraction.model", fake_module)
+
+    def test_extract_returns_error_status_not_an_exception(self, monkeypatch):
+        engine = ExtractionEngine(model=None)  # _initialized=False -- initialize() will actually run
+        self._install_fake_model_module(
+            monkeypatch,
+            "You are trying to access a gated repo. "
+            "Access to model meta-llama/Llama-3.1-8B is restricted.",
+        )
+
+        from src.extraction.inference import ExtractionRequest
+
+        response = engine.extract(ExtractionRequest(text="irrelevant"))
+
+        assert response.status == "error"
+        assert "gated repo" in response.error
+        assert response.model_version == "unknown"
+
+    def test_extract_batch_returns_error_responses_not_an_exception(self, monkeypatch):
+        engine = ExtractionEngine(model=None)
+        self._install_fake_model_module(monkeypatch, "gated repo, no HF_TOKEN")
+
+        from src.extraction.inference import ExtractionRequest
+
+        responses = engine.extract_batch([ExtractionRequest(text="a"), ExtractionRequest(text="b")])
+
+        assert len(responses) == 2
+        assert all(r.status == "error" for r in responses)
+        assert all("gated repo" in r.error for r in responses)
+
+
 class TestExtractTelemetry:
     """extract() must attach ParseTelemetry to every ExtractionResponse it
     returns -- previously there was no way to tell, from the response

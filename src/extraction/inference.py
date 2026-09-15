@@ -129,11 +129,23 @@ class ExtractionEngine:
         Returns:
             ExtractionResponse with results, metadata, and status.
         """
-        self.initialize()
-
         start_time = time.time()
 
         try:
+            # Model loading lives inside this try now, not before it: a
+            # failure here (e.g. HuggingFace 401 on a gated repo with no
+            # HF_TOKEN configured, or any other load-time error) used to
+            # propagate straight out of extract() uncaught, past every
+            # handler below, and serving/api.py's run_extraction() would
+            # convert it into a raw HTTPException(500) -- exactly the "5xx
+            # is not an acceptable outcome" case scripts/smoke_test.py's
+            # own docstring says a missing/unavailable model must not
+            # produce. The except Exception handler at the bottom of this
+            # method already handles self.model being None (see its
+            # ternary below) -- it was written to also cover this case,
+            # initialize() just needed to be inside the block it's read by.
+            self.initialize()
+
             # Step 1: Prepare input
             cleaned_text = self._prepare_text(request.text, request.max_text_length)
 
@@ -215,20 +227,40 @@ class ExtractionEngine:
         Batching gives ~2x throughput by amortizing GPU kernel overhead.
         Documents are grouped by similar length to minimize padding waste.
         """
-        self.initialize()
+        try:
+            # initialize()/generate_batch() used to sit outside any
+            # try/except in this method -- a model-load failure (or any
+            # generate_batch() error) crashed the whole batch call
+            # uncaught, past this method entirely, for the same reason
+            # extract()'s single-request path used to (see its comment).
+            # Unlike extract(), there's no per-request handler to fall
+            # through to here since the model hasn't run for any request
+            # yet -- return one status="error" response per request
+            # instead of propagating.
+            self.initialize()
 
-        # Sort by text length for efficient batching (less padding waste)
-        indexed_requests = sorted(
-            enumerate(requests), key=lambda x: len(x[1].text)
-        )
+            # Sort by text length for efficient batching (less padding waste)
+            indexed_requests = sorted(
+                enumerate(requests), key=lambda x: len(x[1].text)
+            )
 
-        prompts = []
-        for _, req in indexed_requests:
-            text = self._prepare_text(req.text, req.max_text_length)
-            prompts.append(self._build_prompt(text))
+            prompts = []
+            for _, req in indexed_requests:
+                text = self._prepare_text(req.text, req.max_text_length)
+                prompts.append(self._build_prompt(text))
 
-        # Batch inference
-        raw_results = self.model.generate_batch(prompts)
+            # Batch inference
+            raw_results = self.model.generate_batch(prompts)
+        except Exception as e:
+            logger.error(f"Batch extraction failed before any request could run: {e}")
+            model_version = self.model.model_version if self.model else "unknown"
+            return [
+                ExtractionResponse(
+                    result=None, raw_output="", latency_ms=0.0,
+                    model_version=model_version, status="error", error=str(e),
+                )
+                for _ in requests
+            ]
 
         # Post-process each result
         responses = [None] * len(requests)
