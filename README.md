@@ -13,6 +13,8 @@ This repo sits downstream of EDGAR/iXBRL ingestion: it consumes filing text (and
 
 <img width="721" height="557" alt="image" src="https://github.com/user-attachments/assets/ad5936af-71c3-4e45-8c4d-98b097b60ee8" />
 
+[Dashboard](https://fine-tuned-sec-filing-extraction-pi.vercel.app/financial-dashboard)
+
 ---
 
 ## Table of Contents
