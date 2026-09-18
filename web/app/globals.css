@@ -35,3 +35,36 @@
     font-variant-numeric: tabular-nums;
   }
 }
+
+/* Print Ledger: the page prints as a plain landscape report. Interactive
+   chrome (nav, dropdowns, actions) is hidden with Tailwind's print: variant
+   on the components themselves; this block handles page-level behaviour. */
+@media print {
+  @page {
+    size: landscape;
+    margin: 12mm;
+  }
+
+  body {
+    background: #fff;
+  }
+
+  /* Keep status chips, bars and chart strokes coloured on paper. */
+  * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Repeat column headers on every page and never split a row across pages. */
+  thead {
+    display: table-header-group;
+  }
+
+  tr {
+    break-inside: avoid;
+  }
+
+  .shadow-flat {
+    box-shadow: none;
+  }
+}

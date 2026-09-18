@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
+import { tabHref } from "@/lib/tabs";
 
 export default function RootPage() {
-  redirect("/financial-dashboard");
+  redirect(tabHref("portfolio-matrix"));
 }

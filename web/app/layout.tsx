@@ -16,7 +16,7 @@ const plexMono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "EDGAR-X Disclosure Matrix",
+  title: { default: "EDGAR-X Disclosure Matrix", template: "%s | EDGAR-X" },
   description: "Institutional financial disclosure and analytics dashboard.",
   icons: { icon: { url: "/favicon.png", type: "image/png" } },
 };
