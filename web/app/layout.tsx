@@ -18,6 +18,7 @@ const plexMono = IBM_Plex_Mono({
 export const metadata: Metadata = {
   title: "EDGAR-X Disclosure Matrix",
   description: "Institutional financial disclosure and analytics dashboard.",
+  icons: { icon: { url: "/favicon.png", type: "image/png" } },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
