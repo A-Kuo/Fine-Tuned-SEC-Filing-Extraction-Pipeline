@@ -1,0 +1,37 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --bg-canvas: 210 20% 98%;      /* #F4F6F8 - Formal neutral light grey */
+    --bg-surface: 0 0% 100%;       /* #FFFFFF */
+    --bg-subtle: 215 25% 95%;      /* #ECEFF2 - Institutional header grey */
+    --border-formal: 217 19% 82%;  /* #C4CDD5 - Defined, clean rules */
+
+    --primary-navy: 219 46% 16%;    /* #1A2E4C - SEC Dark Navy / Trust Anchor */
+    --secondary-blue: 211 100% 35%; /* #0056B3 - Fidelity Corporate Blue */
+    --accent-slate: 215 16% 47%;    /* #475569 - Secondary structural text */
+
+    --text-primary: 224 71% 4%;     /* #030712 - High-contrast readable black */
+    --text-secondary: 217 19% 27%;  /* #344054 - Corporate reading text */
+    --text-muted: 215 14% 56%;      /* #768396 - Structural labels/dates */
+
+    --market-gain: 142 72% 29%;     /* #15803D - Sharp fiscal green */
+    --market-gain-bg: 143 85% 96%;  /* #F0FDF4 */
+    --market-loss: 0 74% 42%;       /* #B91C1C - Strict accounting red */
+    --market-loss-bg: 0 86% 97%;    /* #FEF2F2 */
+  }
+
+  body {
+    background-color: hsl(var(--bg-canvas));
+    color: hsl(var(--text-primary));
+    -webkit-font-smoothing: antialiased;
+  }
+}
+
+@layer utilities {
+  .tabular-figures {
+    font-variant-numeric: tabular-nums;
+  }
+}

@@ -92,6 +92,10 @@ serving:
   # prior version of lifespan() pinged its own not-yet-listening address
   # here, which always failed, permanently disabling this code path.
   vllm_url: ""
+  # Deployed frontend origin (the Next.js dashboard in web/). When set, GET /
+  # 307-redirects here instead of returning the API index. Leave empty
+  # locally if the frontend isn't running.
+  frontend_url: ""
 
 security:
   require_api_key: false

@@ -93,6 +93,43 @@ class TestResponseSchemas:
         assert resp.p99_latency_ms == 920
 
 
+# ─── Root Route Tests ────────────────────────────────────────────────────────
+
+class TestRootRoute:
+    """GET / is what actually connects this API to the deployed frontend
+    (web/'s Next.js dashboard) -- config.yaml's serving.frontend_url."""
+
+    def test_redirects_to_frontend_when_configured(self):
+        import asyncio
+        from serving.api import root_route, state
+
+        original = state.config
+        state.config = {"serving": {"frontend_url": "https://dashboard.example.com"}}
+        try:
+            response = asyncio.run(root_route())
+        finally:
+            state.config = original
+
+        assert response.status_code == 307
+        assert response.headers["location"] == "https://dashboard.example.com"
+
+    def test_returns_json_index_when_frontend_url_unset(self):
+        import asyncio
+        import json
+        from serving.api import root_route, state
+
+        original = state.config
+        state.config = {"serving": {}}
+        try:
+            response = asyncio.run(root_route())
+        finally:
+            state.config = original
+
+        body = json.loads(response.body)
+        assert body["docs"] == "/docs"
+        assert body["frontend"] is None
+
+
 # ─── Prompt Building Tests ──────────────────────────────────────────────────
 
 class TestPromptBuilding:

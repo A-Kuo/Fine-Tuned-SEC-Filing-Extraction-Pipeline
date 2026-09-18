@@ -34,6 +34,7 @@ from typing import Any, Optional
 import httpx
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from loguru import logger
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
 from pydantic import BaseModel, Field
@@ -394,6 +395,7 @@ def create_app(config: dict | None = None) -> FastAPI:
                 out.append(ExtractResponseModel(status="error", error=str(e.detail), latency_ms=0.0))
         return out
 
+    app.add_api_route("/", root_route, methods=["GET"])
     app.add_api_route("/health", health_check, methods=["GET"], response_model=HealthResponse)
     app.add_api_route("/metrics", prometheus_metrics, methods=["GET"])
     app.add_api_route("/stats", stats_json, methods=["GET"], response_model=StatsResponse)
@@ -518,6 +520,27 @@ async def run_extraction(req: ExtractRequest, background_tasks: BackgroundTasks)
         # and works correctly either way.
         if idempotency_key in state.inflight_locks and not state.inflight_locks[idempotency_key].locked():
             del state.inflight_locks[idempotency_key]
+
+
+async def root_route() -> Response:
+    """Routes GET / at the deployed frontend (web/'s Next.js dashboard) when
+    serving.frontend_url is configured -- this API and the dashboard are
+    separate deployables (the model needs GPU/heavy deps Vercel can't run),
+    so this redirect is what actually connects them for a visitor landing on
+    the API's own origin. Falls back to a small JSON index locally, where
+    frontend_url is typically unset."""
+    frontend_url = (state.config.get("serving") or {}).get("frontend_url")
+    if frontend_url:
+        return RedirectResponse(frontend_url, status_code=307)
+    return Response(
+        content=json.dumps({
+            "service": "Financial LLM Extraction API",
+            "docs": "/docs",
+            "health": "/health",
+            "frontend": None,
+        }),
+        media_type="application/json",
+    )
 
 
 async def health_check() -> HealthResponse:

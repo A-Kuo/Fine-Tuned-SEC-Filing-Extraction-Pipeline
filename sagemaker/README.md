@@ -1,10 +1,13 @@
 # SageMaker Async Inference deployment
 
 Scaffolding for deploying the fine-tuned QLoRA adapter to a real GPU
-endpoint, reachable from the Vercel frontend (`frontend/`) through a thin
-proxy (`frontend/api/`). **Written but not deployed** -- no AWS resources
-exist from this directory as of this commit. See "Status" below for
-exactly what's real versus what's still needed.
+endpoint, reachable from the Vercel frontend (`web/`, a Next.js app --
+replaced the earlier static `frontend/` site) through a thin proxy.
+**Written but not deployed** -- no AWS resources exist from this directory
+as of this commit, and the proxy route handlers themselves still need to
+be ported to `web/app/api/` (TypeScript) now that the frontend is Next.js
+rather than static HTML with Python serverless functions. See "Status"
+below for exactly what's real versus what's still needed.
 
 ## Why this architecture (and why not simpler)
 
@@ -15,8 +18,8 @@ exactly what's real versus what's still needed.
 - **Why not call SageMaker directly from the browser?** `InvokeEndpoint`
   requires AWS Signature Version 4 request signing. A browser cannot hold
   AWS credentials safely to sign with client-side. A server-side proxy
-  (`frontend/api/invoke.py` + `status.py`, Vercel serverless functions)
-  is genuinely required, not a nice-to-have.
+  (route handlers under `web/app/api/`, Vercel serverless functions) is
+  genuinely required, not a nice-to-have.
 - **Why Asynchronous Inference specifically, not Serverless Inference or a
   real-time endpoint?**
   | Mode | GPU | Scales to zero | Fits this model? |
@@ -70,9 +73,11 @@ exactly what's real versus what's still needed.
 - **`deploy_async_endpoint.py`'s container image is a placeholder**
   (`REPLACE_WITH_REAL_ECR_IMAGE_URI`) -- pick a real SageMaker-provided
   PyTorch/HuggingFace inference DLC URI for your region before a real run.
-- **The Vercel proxy (`frontend/api/`) has no endpoint to call yet** --
-  its `SAGEMAKER_ENDPOINT_NAME`/`SAGEMAKER_S3_BUCKET` environment
-  variables aren't set on any Vercel project.
+- **The Vercel proxy doesn't exist yet in `web/`** -- it still needs to be
+  ported from the old Python `frontend/api/invoke.py`/`status.py` into
+  TypeScript route handlers, and its `SAGEMAKER_ENDPOINT_NAME`/
+  `SAGEMAKER_S3_BUCKET` environment variables aren't set on any Vercel
+  project.
 
 ## Deploying for real (once a trained adapter exists)
 

@@ -1,0 +1,532 @@
+<title>Untagged Prose</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --paper: #F1F3EE;
+    --paper-raised: #E7EAE2;
+    --ink: #161B22;
+    --ink-soft: #4A5260;
+    --rule: rgba(22, 27, 34, 0.14);
+    --xbrl: #2557A7;
+    --xbrl-soft: rgba(37, 87, 167, 0.1);
+    --llm: #B8720F;
+    --llm-soft: rgba(184, 114, 15, 0.12);
+    --good: #3F7A5C;
+    --good-soft: rgba(63, 122, 92, 0.12);
+    --display: "Fraunces", "Iowan Old Style", Georgia, serif;
+    --body: "IBM Plex Sans", -apple-system, "Segoe UI", sans-serif;
+    --mono: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #0D1219;
+      --paper-raised: #141B24;
+      --ink: #E7E9E2;
+      --ink-soft: #98A0AC;
+      --rule: rgba(231, 233, 226, 0.16);
+      --xbrl: #6FA0E0;
+      --xbrl-soft: rgba(111, 160, 224, 0.14);
+      --llm: #E0A64A;
+      --llm-soft: rgba(224, 166, 74, 0.14);
+      --good: #6FB894;
+      --good-soft: rgba(111, 184, 148, 0.14);
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #0D1219;
+    --paper-raised: #141B24;
+    --ink: #E7E9E2;
+    --ink-soft: #98A0AC;
+    --rule: rgba(231, 233, 226, 0.16);
+    --xbrl: #6FA0E0;
+    --xbrl-soft: rgba(111, 160, 224, 0.14);
+    --llm: #E0A64A;
+    --llm-soft: rgba(224, 166, 74, 0.14);
+    --good: #6FB894;
+    --good-soft: rgba(111, 184, 148, 0.14);
+  }
+
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--body);
+    font-size: 16px;
+    line-height: 1.6;
+    padding-inline: 24px;
+    padding-block: 56px 80px;
+  }
+
+  .page { max-width: 920px; margin: 0 auto; }
+  .prose { max-width: 700px; }
+
+  h1, h2, h3 { font-family: var(--display); font-weight: 500; text-wrap: balance; margin: 0; }
+  a { color: var(--xbrl); }
+  :root[data-theme="dark"] a, @media (prefers-color-scheme: dark) { }
+
+  code, .mono { font-family: var(--mono); }
+  .tabular { font-variant-numeric: tabular-nums; }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+  .eyebrow .item-no {
+    color: var(--xbrl);
+    font-weight: 500;
+  }
+
+  /* ---------- Masthead ---------- */
+  .masthead {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    padding-bottom: 20px;
+    border-bottom: 2px solid var(--ink);
+    margin-bottom: 44px;
+    gap: 20px;
+    flex-wrap: wrap;
+  }
+  .masthead .brand { font-family: var(--mono); font-size: 0.78rem; letter-spacing: 0.06em; }
+  .masthead .brand strong { font-weight: 500; }
+  .filing-meta {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    color: var(--ink-soft);
+    text-align: right;
+    line-height: 1.5;
+  }
+
+  /* ---------- Hero ---------- */
+  .hero { margin-bottom: 72px; }
+  .hero h1 {
+    font-size: clamp(2.1rem, 5vw, 3.1rem);
+    line-height: 1.08;
+    max-width: 12ch;
+    margin-bottom: 18px;
+  }
+  .hero .dek {
+    max-width: 56ch;
+    color: var(--ink-soft);
+    font-size: 1.08rem;
+  }
+  .hero .dek strong { color: var(--ink); font-weight: 600; }
+
+  .transform {
+    margin-top: 44px;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    gap: 20px;
+    align-items: stretch;
+  }
+  .transform .arrow {
+    align-self: center;
+    color: var(--ink-soft);
+    font-family: var(--mono);
+    font-size: 1.4rem;
+  }
+  .pane {
+    background: var(--paper-raised);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    padding: 18px 20px;
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    line-height: 1.7;
+  }
+  .pane .pane-label {
+    font-family: var(--body);
+    font-size: 0.68rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    margin-bottom: 12px;
+    display: block;
+  }
+  .pane.raw { color: var(--ink-soft); white-space: pre-wrap; }
+  .pane.raw mark {
+    background: none;
+    color: var(--ink);
+    font-weight: 500;
+    border-bottom: 2px solid var(--llm);
+    padding-bottom: 1px;
+  }
+  .field-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 5px 0;
+    border-bottom: 1px dashed var(--rule);
+    gap: 12px;
+  }
+  .field-row:last-child { border-bottom: none; }
+  .field-row .k { color: var(--ink-soft); }
+  .field-row .v { color: var(--ink); font-weight: 500; text-align: right; }
+  .tag {
+    display: inline-block;
+    font-size: 0.62rem;
+    letter-spacing: 0.04em;
+    padding: 1px 6px;
+    border-radius: 2px;
+    margin-left: 8px;
+    font-weight: 500;
+  }
+  .tag.xbrl { background: var(--xbrl-soft); color: var(--xbrl); }
+  .tag.llm { background: var(--llm-soft); color: var(--llm); }
+
+  @media (max-width: 640px) {
+    .transform { grid-template-columns: 1fr; }
+    .transform .arrow { transform: rotate(90deg); padding: 4px 0; }
+  }
+
+  /* ---------- Sections ---------- */
+  section { margin-bottom: 72px; }
+  section > h2 { font-size: 1.7rem; margin-bottom: 20px; }
+  .prose p { margin: 0 0 16px; }
+  .prose p:last-child { margin-bottom: 0; }
+
+  /* ---------- Architecture diagram ---------- */
+  .pipeline {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+    margin: 32px 0;
+  }
+  .stage {
+    background: var(--paper-raised);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    padding: 16px 14px;
+    position: relative;
+  }
+  .stage .stage-no {
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    color: var(--ink-soft);
+    display: block;
+    margin-bottom: 8px;
+  }
+  .stage h3 { font-family: var(--body); font-size: 0.92rem; font-weight: 600; margin-bottom: 6px; }
+  .stage p { font-size: 0.8rem; color: var(--ink-soft); margin: 0; line-height: 1.5; }
+  .stage.xbrl-stage { border-top: 3px solid var(--xbrl); }
+  .stage.llm-stage { border-top: 3px solid var(--llm); }
+  @media (max-width: 760px) {
+    .pipeline { grid-template-columns: 1fr 1fr; }
+  }
+  @media (max-width: 460px) {
+    .pipeline { grid-template-columns: 1fr; }
+  }
+
+  .precedence-note {
+    margin-top: 20px;
+    padding: 14px 18px;
+    background: var(--good-soft);
+    border-left: 3px solid var(--good);
+    border-radius: 0 3px 3px 0;
+    font-size: 0.9rem;
+    color: var(--ink);
+  }
+  .precedence-note code { background: var(--paper-raised); padding: 1px 5px; border-radius: 2px; }
+
+  /* ---------- Evidence table ---------- */
+  .evidence {
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .ev-row {
+    display: grid;
+    grid-template-columns: 1.6fr 1fr 0.9fr;
+    gap: 16px;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--rule);
+    align-items: center;
+  }
+  .ev-row:last-child { border-bottom: none; }
+  .ev-row.head {
+    background: var(--paper-raised);
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+  }
+  .ev-metric { font-weight: 500; }
+  .ev-metric .sub { display: block; font-size: 0.78rem; color: var(--ink-soft); font-weight: 400; margin-top: 2px; }
+  .ev-value { font-family: var(--mono); font-size: 1.05rem; }
+  .status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.03em;
+    padding: 3px 9px;
+    border-radius: 20px;
+  }
+  .status-pill.measured { background: var(--good-soft); color: var(--good); }
+  .status-pill.target { background: var(--llm-soft); color: var(--llm); }
+  .status-pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  @media (max-width: 640px) {
+    .ev-row { grid-template-columns: 1fr; gap: 6px; }
+    .ev-row.head { display: none; }
+    .ev-value { font-size: 1.3rem; }
+  }
+
+  /* ---------- Filings strip ---------- */
+  .tape {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-top: 28px;
+  }
+  .tape-item {
+    font-family: var(--mono);
+    font-size: 0.74rem;
+    background: var(--paper-raised);
+    border: 1px solid var(--rule);
+    border-radius: 20px;
+    padding: 6px 13px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .tape-item .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--good); flex-shrink: 0; }
+
+  /* ---------- Risk factors (limitations) ---------- */
+  .risk-list { display: flex; flex-direction: column; gap: 0; }
+  .risk-item {
+    display: grid;
+    grid-template-columns: 28px 1fr;
+    gap: 14px;
+    padding: 18px 0;
+    border-bottom: 1px solid var(--rule);
+  }
+  .risk-item:first-child { padding-top: 0; }
+  .risk-item:last-child { border-bottom: none; }
+  .risk-item .mark { font-family: var(--mono); color: var(--llm); font-size: 1.1rem; line-height: 1.4; }
+  .risk-item h3 { font-size: 1rem; font-weight: 600; margin-bottom: 4px; }
+  .risk-item p { font-size: 0.92rem; color: var(--ink-soft); margin: 0; }
+
+  /* ---------- Stack ---------- */
+  .stack-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    margin-top: 28px;
+  }
+  .stack-card {
+    padding: 18px;
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+  }
+  .stack-card .role {
+    font-family: var(--mono);
+    font-size: 0.66rem;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    display: block;
+    margin-bottom: 8px;
+  }
+  .stack-card h3 { font-size: 1.02rem; font-weight: 600; margin-bottom: 6px; font-family: var(--body); }
+  .stack-card p { font-size: 0.84rem; color: var(--ink-soft); margin: 0; line-height: 1.55; }
+  @media (max-width: 700px) { .stack-grid { grid-template-columns: 1fr; } }
+
+  /* ---------- Footer / exhibits ---------- */
+  footer {
+    border-top: 2px solid var(--ink);
+    padding-top: 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 16px;
+    font-family: var(--mono);
+    font-size: 0.76rem;
+    color: var(--ink-soft);
+  }
+  footer a { color: var(--ink); text-decoration: none; border-bottom: 1px solid var(--rule); }
+  footer a:hover { border-color: var(--ink); }
+
+  ::selection { background: var(--xbrl); color: var(--paper); }
+</style>
+
+<div class="page">
+
+  <div class="masthead">
+    <div class="brand"><strong>UNTAGGED PROSE</strong> · sec extraction</div>
+    <div class="filing-meta">Form 10-K · dual-track extraction<br>Fiscal architecture: v1</div>
+  </div>
+
+  <section class="hero">
+    <div class="eyebrow"><span class="item-no">Item 1</span> Business</div>
+    <h1>Every SEC filing has two kinds of numbers.</h1>
+    <p class="dek">Some are machine-tagged in iXBRL — deterministic, already structured. The rest live in prose: MD&amp;A, footnotes, non-GAAP reconciliations. This pipeline reads the part XBRL doesn't cover, using a QLoRA fine-tuned Llama 3.1&nbsp;8B, and never lets an inference <strong>overwrite</strong> a tagged fact.</p>
+
+    <div class="transform">
+      <div class="pane raw">
+        <span class="pane-label">Raw filing text</span>SEC FILING – FORM 10-Q
+Registrant: <mark>Berkshire Hathaway Inc.</mark> (BRK)
+Filing Date: 2023-11-07
+
+FINANCIAL HIGHLIGHTS:
+Revenue: <mark>$362.3 billion</mark>
+Net Income: <mark>$61.6 billion</mark>
+Diluted EPS: <mark>$13.19</mark>
+
+Founded in 1905, the Company has
+grown to become one of the largest
+Financials firms globally.</div>
+      <div class="arrow">→</div>
+      <div class="pane">
+        <span class="pane-label">Structured output</span>
+        <div class="field-row"><span class="k">company_name</span><span class="v">Berkshire Hathaway<span class="tag llm">llm · 0.91</span></span></div>
+        <div class="field-row"><span class="k">filing_type</span><span class="v">10-Q<span class="tag llm">llm · 0.97</span></span></div>
+        <div class="field-row"><span class="k">revenue</span><span class="v">362,300,000,000<span class="tag xbrl">xbrl · 1.00</span></span></div>
+        <div class="field-row"><span class="k">net_income</span><span class="v">61,600,000,000<span class="tag xbrl">xbrl · 1.00</span></span></div>
+        <div class="field-row"><span class="k">eps</span><span class="v">13.19<span class="tag llm">llm · 0.88</span></span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="prose">
+    <div class="eyebrow"><span class="item-no">Item 7</span> Architecture &amp; Analysis</div>
+    <h2>Xbrl wins. Always.</h2>
+    <p>Extraction runs in two tracks that write to the same schema. The <strong style="color:var(--xbrl)">xbrl track</strong> parses filer-tagged facts — deterministic, confidence 1.0, no model involved. The <strong style="color:var(--llm)">llm track</strong> covers everything left over: narrative sections a tag was never attached to. Both tracks emit the same record shape, tagged with the method and confidence that produced it, so a downstream reader can tell which numbers to trust unconditionally and which to verify.</p>
+  </section>
+
+  <section>
+    <div class="pipeline">
+      <div class="stage xbrl-stage">
+        <span class="stage-no">01 · deterministic</span>
+        <h3>iXBRL parse</h3>
+        <p>Filer-tagged facts read directly from inline XBRL. No inference — a number the company itself machine-tagged.</p>
+      </div>
+      <div class="stage">
+        <span class="stage-no">02 · segmentation</span>
+        <h3>Section extraction</h3>
+        <p>Untagged prose is split into MD&amp;A, risk factors, and financial-statement sections before anything is inferred.</p>
+      </div>
+      <div class="stage llm-stage">
+        <span class="stage-no">03 · inference</span>
+        <h3>QLoRA extraction</h3>
+        <p>Llama&nbsp;3.1&nbsp;8B, NF4 4-bit + LoRA (r=16), reads each section and emits structured JSON with a confidence score.</p>
+      </div>
+      <div class="stage">
+        <span class="stage-no">04 · recovery</span>
+        <h3>5-stage parser</h3>
+        <p>Fence-stripping, brace-matching, truncation repair, and field-level regex fallback recover a result from imperfect model output.</p>
+      </div>
+    </div>
+    <div class="precedence-note">
+      Enforced at the database layer, not just in application code: <code>WHERE NOT (method = 'xbrl' AND EXCLUDED.method != 'xbrl')</code> — an <code>llm</code> fact can never overwrite an <code>xbrl</code> fact for the same key. The reverse is permitted.
+    </div>
+  </section>
+
+  <section>
+    <div class="eyebrow"><span class="item-no">Item 8</span> Financial Statements &amp; Evidence</div>
+    <h2>What's measured, and what's still a target</h2>
+    <div class="evidence">
+      <div class="ev-row head"><span>Metric</span><span>Value</span><span>Status</span></div>
+      <div class="ev-row">
+        <div class="ev-metric">Schema conformance<span class="sub">1 synthetic + 5 real EDGAR filings</span></div>
+        <div class="ev-value tabular">6 / 6</div>
+        <span class="status-pill measured">measured</span>
+      </div>
+      <div class="ev-row">
+        <div class="ev-metric">Model load, Tesla T4 16GB<span class="sub">NF4 base weights, resident memory</span></div>
+        <div class="ev-value tabular">152.0s · 1,951 MB</div>
+        <span class="status-pill measured">measured</span>
+      </div>
+      <div class="ev-row">
+        <div class="ev-metric">Fetch checkpoint dedup<span class="sub">cold 44.8s → warm 4.0s, same 5 filings</span></div>
+        <div class="ev-value tabular">91.1%</div>
+        <span class="status-pill measured">measured</span>
+      </div>
+      <div class="ev-row">
+        <div class="ev-metric">Trainable parameters<span class="sub">LoRA r=16, 7 target modules, Llama 3.1 8B</span></div>
+        <div class="ev-value tabular">42M / 8.03B</div>
+        <span class="status-pill measured">computed</span>
+      </div>
+      <div class="ev-row">
+        <div class="ev-metric">Field-level accuracy<span class="sub">pending a trained adapter</span></div>
+        <div class="ev-value tabular">92–99%</div>
+        <span class="status-pill target">target</span>
+      </div>
+      <div class="ev-row">
+        <div class="ev-metric">Inference latency, p50<span class="sub">pending a live GPU endpoint</span></div>
+        <div class="ev-value tabular">~320 ms</div>
+        <span class="status-pill target">target</span>
+      </div>
+    </div>
+    <p style="font-size:0.82rem; color:var(--ink-soft); margin-top:14px;">Every "measured" row cites a script and a real run; every "target" row is an unverified goal, not a result — see the repository's evidence table for exact provenance.</p>
+
+    <div class="tape">
+      <span class="tape-item"><span class="dot"></span>AAPL · 10-K</span>
+      <span class="tape-item"><span class="dot"></span>MSFT · 10-K</span>
+      <span class="tape-item"><span class="dot"></span>KO · 10-K</span>
+      <span class="tape-item"><span class="dot"></span>MRNA · 10-K</span>
+      <span class="tape-item"><span class="dot"></span>O · 10-K</span>
+    </div>
+  </section>
+
+  <section class="prose">
+    <div class="eyebrow"><span class="item-no">Item 2</span> Properties</div>
+    <h2>The stack</h2>
+    <p>Three services, each doing exactly one job — no service holds a responsibility another one already owns.</p>
+    <div class="stack-grid">
+      <div class="stack-card">
+        <span class="role">Postgres · Supabase</span>
+        <h3>System of record</h3>
+        <p>Two schemas: a flat live-serving table set, and a normalized <code style="font-family:var(--mono)">intel.*</code> schema with lineage, RLS, and pgvector for retrieval.</p>
+      </div>
+      <div class="stack-card">
+        <span class="role">GPU · Kaggle / SageMaker</span>
+        <h3>Inference</h3>
+        <p>Training runs on Kaggle's free T4; serving is scaffolded for SageMaker Async Inference — GPU on demand, scaled to zero when idle.</p>
+      </div>
+      <div class="stack-card">
+        <span class="role">FastAPI · Vercel</span>
+        <h3>Interface</h3>
+        <p>A model-serving API plus a static debug console — kept as separate deployables, since one needs a GPU and the other emphatically doesn't.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="prose">
+    <div class="eyebrow"><span class="item-no">Item 1A</span> Risk Factors</div>
+    <h2>Where this is still honest about being unfinished</h2>
+    <div class="risk-list">
+      <div class="risk-item">
+        <span class="mark">—</span>
+        <div><h3>No trained adapter yet</h3><p>Every real benchmark above ran on base weights. The training workflow is fixed and ready; it hasn't been run for a final adapter.</p></div>
+      </div>
+      <div class="risk-item">
+        <span class="mark">—</span>
+        <div><h3>The heuristic track doesn't generalize</h3><p>Measured directly against 5 real 10-Ks: 0 of 5 produced a usable number. It works on short synthetic text and nothing else, by design of what it's for.</p></div>
+      </div>
+      <div class="risk-item">
+        <span class="mark">—</span>
+        <div><h3>Accuracy figures are targets, not results</h3><p>92–99% field accuracy is an unverified goal carried from the project spec, clearly separated in the evidence table above from anything actually measured.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <span>Fine-Tuned-SEC-Filing-Extraction-Pipeline</span>
+    <span>MIT · adapter weights · Llama 3.1 Community License · base model</span>
+  </footer>
+
+</div>

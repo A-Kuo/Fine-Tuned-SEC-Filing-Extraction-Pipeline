@@ -55,6 +55,6 @@ ignore_missing_imports = true
 # No [tool.vercel] here: serving/api.py needs torch/transformers/bitsandbytes/
 # vLLM and GPU access, which Vercel's serverless Python runtime cannot
 # provide (size limits well under what those packages need, no GPU at all).
-# The actual deployable-on-Vercel piece is frontend/ (a static site) plus
-# frontend/api/ (a thin proxy to a real SageMaker endpoint) -- see
-# sagemaker/README.md and frontend/README.md.
+# The actual deployable-on-Vercel piece is web/ (a Next.js app) -- see
+# sagemaker/README.md and web/README.md. Its Vercel project's Root
+# Directory must be set to "web".
