@@ -11,7 +11,8 @@
 
 This repo sits downstream of EDGAR/iXBRL ingestion: it consumes filing text (and, where available, tagged XBRL facts) and extracts structured data from the untagged prose those facts don't cover, while preserving confidence, provenance, and model versioning.
 
-<img width="721" height="557" alt="image" src="https://github.com/user-attachments/assets/ad5936af-71c3-4e45-8c4d-98b097b60ee8" />
+<img width="1429" height="744" alt="image" src="https://github.com/user-attachments/assets/ceaf2382-9069-4838-a1e3-ec2c413cdddc" />
+
 
 [Dashboard](https://fine-tuned-sec-filing-extraction-pi.vercel.app/financial-dashboard)
 
