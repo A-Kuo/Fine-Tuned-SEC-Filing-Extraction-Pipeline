@@ -56,8 +56,13 @@ class TestCircuitBreakerRecovery:
         cb.record_failure()
         cb.record_failure()
         assert cb.state == CircuitState.OPEN
-        # Force half-open by manipulating timeout
-        cb._last_failure_time = 0.0
+        # Force half-open by manipulating timeout. allow() compares against
+        # time.monotonic(), whose zero-point is arbitrary (often near-zero
+        # on a freshly booted CI container, but large on a long-uptime dev
+        # machine) -- setting _last_failure_time to a literal 0.0 only
+        # reliably looks "expired" on the latter, which made this test
+        # flaky across environments. Back-date it relative to now instead.
+        cb._last_failure_time = time.monotonic() - cb.reset_timeout_s - 1
         assert cb.allow() is True
         cb.record_success()
         assert cb.state == CircuitState.CLOSED
