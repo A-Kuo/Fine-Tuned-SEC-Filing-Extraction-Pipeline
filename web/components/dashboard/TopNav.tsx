@@ -1,10 +1,11 @@
 "use client";
 
-import { Landmark, Search, UserRound } from "lucide-react";
+import { ExternalLink, Landmark, Search, UserRound } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { withFilter } from "@/lib/filters";
+import { REPO_URL, SITE_NAME } from "@/lib/site";
 import { BASE_PATH, TABS, tabHref } from "@/lib/tabs";
 import { MarketStatusPill } from "./MarketStatusPill";
 
@@ -58,19 +59,24 @@ export function TopNav() {
   };
 
   const tabClass = (isActive: boolean) =>
-    `flex items-center px-4 h-full text-xs font-medium tracking-wide border border-white/15 -ml-px first:ml-0 transition-colors whitespace-nowrap focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white ${
+    `flex items-center px-3 xl:px-4 h-full text-xs font-medium tracking-wide border border-white/15 -ml-px first:ml-0 transition-colors whitespace-nowrap focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white ${
       isActive ? "bg-white/10 border-b-2 border-b-white text-white" : "text-white/70 hover:bg-white/5 hover:text-white"
     }`;
 
   return (
     <div className="print:hidden">
       <header className="h-14 bg-primary-navy text-white flex items-center px-4 gap-6">
-        <Link href={tabHref("portfolio-matrix")} className="flex items-center gap-2 shrink-0">
+        <Link
+          href="/"
+          aria-label={`${SITE_NAME}, home`}
+          aria-current={pathname === "/" ? "page" : undefined}
+          className="flex items-center gap-2 shrink-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white"
+        >
           <Landmark className="h-5 w-5" strokeWidth={1.75} aria-hidden />
-          <span className="text-sm font-semibold tracking-tight whitespace-nowrap">EDGAR-X Disclosure Matrix</span>
+          <span className="text-sm font-semibold tracking-tight whitespace-nowrap">{SITE_NAME}</span>
         </Link>
 
-        <nav aria-label="Dashboard sections" className="hidden md:flex items-stretch h-14 flex-1 min-w-0">
+        <nav aria-label="Dashboard sections" className="hidden lg:flex items-stretch h-14 flex-1 min-w-0">
           {TABS.map((tab) => (
             <Link
               key={tab.slug}
@@ -84,7 +90,7 @@ export function TopNav() {
         </nav>
 
         <div className="flex items-center gap-3 shrink-0 ml-auto">
-          <form role="search" onSubmit={onSubmit} className="hidden lg:flex items-center gap-2 bg-white/10 border border-white/20 h-8 px-2 w-64 focus-within:border-white/60">
+          <form role="search" onSubmit={onSubmit} className="hidden xl:flex items-center gap-2 bg-white/10 border border-white/20 h-8 px-2 w-48 focus-within:border-white/60">
             <Search className="h-3.5 w-3.5 text-white/60" aria-hidden />
             <input
               type="search"
@@ -98,14 +104,22 @@ export function TopNav() {
 
           <MarketStatusPill />
 
-          <div className="flex items-center gap-1.5 h-8 px-2 border border-white/20">
+          <a
+            href={REPO_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="A. Kuo on GitHub, opens in a new tab"
+            title="View the project on GitHub"
+            className="flex items-center gap-1.5 h-8 px-2 border border-white/20 hover:bg-white/10 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+          >
             <UserRound className="h-3.5 w-3.5" aria-hidden />
             <span className="text-xs font-medium hidden sm:inline">A. Kuo</span>
-          </div>
+            <ExternalLink className="h-3 w-3 text-white/60 hidden sm:block" aria-hidden />
+          </a>
         </div>
       </header>
 
-      <nav aria-label="Dashboard sections" className="md:hidden h-11 bg-primary-navy text-white flex items-stretch overflow-x-auto border-t border-white/15">
+      <nav aria-label="Dashboard sections" className="lg:hidden h-11 bg-primary-navy text-white flex items-stretch overflow-x-auto border-t border-white/15">
         {TABS.map((tab) => (
           <Link
             key={tab.slug}

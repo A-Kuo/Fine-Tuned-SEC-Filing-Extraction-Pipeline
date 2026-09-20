@@ -1,4 +1,4 @@
-# FinDoc Dashboard (web/)
+# SEC Edgar Filing Platform (web/)
 
 Institutional-style financial disclosure and analytics dashboard, built with
 Next.js 14 (App Router, TypeScript), Tailwind CSS, `lucide-react`, and
@@ -6,7 +6,7 @@ Next.js 14 (App Router, TypeScript), Tailwind CSS, `lucide-react`, and
 
 ## Pages
 
-`/` redirects to the first tab. All four live under `/financial-dashboard/`:
+`/` is the **home page**: it explains the project, what the fine-tuned model does in plain language, how the pipeline works, and which dashboard tabs are real data versus illustrative (`lib/provenance.ts` is the single source for that table, so update it in the same change as any data work). The four dashboard tabs live under `/financial-dashboard/` (which redirects to the first tab):
 
 | Tab | Route | Filters that apply |
 |---|---|---|
@@ -19,6 +19,9 @@ Filter state lives in the URL (`?asset=&entity=&window=&q=`), so views are
 shareable and survive a reload, and the nav tabs carry the current filters
 across pages. A control that doesn't apply to the current tab is shown
 disabled rather than silently doing nothing.
+
+Header layout: the four tabs sit in the header from 1024px up and in a scrollable
+strip below it; the header search box appears from 1280px up.
 
 ## Actions
 
@@ -48,6 +51,11 @@ The Yahoo endpoint is unofficial. If it is unreachable, rate-limits the host,
 or changes shape, the route falls back to the calendar alone and the pill
 shows "(est.)". Responses are edge-cached for 60s, so upstream sees roughly one
 call a minute however many people have the page open. No API key is needed.
+
+Hovering, focusing or clicking the pill opens a popover with the session hours, the
+next open/close, the last S&P 500 trade time, and links to the sources
+(the Yahoo Finance S&P 500 quote page and NYSE's hours-and-holidays page). The
+"A. Kuo" tile in the header links to the GitHub repo.
 
 ## Data
 

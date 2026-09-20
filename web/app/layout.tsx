@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Inter, IBM_Plex_Mono } from "next/font/google";
+import { SITE_NAME } from "@/lib/site";
 import "./globals.css";
 
 const inter = Inter({
@@ -16,8 +17,8 @@ const plexMono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: { default: "EDGAR-X Disclosure Matrix", template: "%s | EDGAR-X" },
-  description: "Institutional financial disclosure and analytics dashboard.",
+  title: { default: SITE_NAME, template: `%s | ${SITE_NAME}` },
+  description: "Turns SEC filings into structured data and records where every value came from.",
   icons: { icon: { url: "/favicon.png", type: "image/png" } },
 };
 

@@ -15,7 +15,7 @@ const TIMEOUT_MS = 4000;
 async function fetchYahooMeta(): Promise<unknown> {
   try {
     const res = await fetch(YAHOO_URL, {
-      headers: { "User-Agent": "Mozilla/5.0 (compatible; EDGAR-X/1.0)", Accept: "application/json" },
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; SECEdgarFilingPlatform/1.0)", Accept: "application/json" },
       signal: AbortSignal.timeout(TIMEOUT_MS),
       cache: "no-store",
     });

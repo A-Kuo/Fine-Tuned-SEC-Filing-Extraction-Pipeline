@@ -8,6 +8,7 @@ import { Dropdown } from "@/components/ui/Dropdown";
 import { recordAuditEvent } from "@/lib/audit";
 import type { Dataset } from "@/lib/export";
 import { describeFilters, withFilter, type FilterState, type Option } from "@/lib/filters";
+import { SITE_NAME } from "@/lib/site";
 import { tabBySlug, tabHref, type TabSlug } from "@/lib/tabs";
 import type { FilingRow } from "@/lib/types";
 import { ExportMenu } from "./ExportMenu";
@@ -72,7 +73,7 @@ export function FilterBanner({ tab, title, subtitle, filters, options, exportDat
   return (
     <div className="border-b border-border-formal bg-surface">
       <div className="hidden print:block px-6 pt-4 pb-3 border-b-2 border-black text-black">
-        <p className="text-[11px] font-semibold tracking-wide uppercase">EDGAR-X Disclosure Matrix</p>
+        <p className="text-[11px] font-semibold tracking-wide uppercase">{SITE_NAME}</p>
         <p className="text-xs mt-1">{filterSummary}</p>
         <p className="text-[11px] mt-1">
           Printed <time ref={printedAt} /> &middot; Illustrative data, not real filings or holdings
