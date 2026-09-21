@@ -62,6 +62,7 @@ def _apply_env_overrides(config: dict) -> None:
         "LOG_FORMAT": ("logging", "format"),
         "LOG_LEVEL": ("logging", "level"),
         "MLFLOW_TRACKING_URI": ("mlflow", "tracking_uri"),
+        "HF_ADAPTER_REPO": ("huggingface", "adapter_repo"),
         "KAGGLE_USERNAME": ("kaggle", "username"),
         "KAGGLE_KEY": ("kaggle", "key"),
     }

@@ -45,12 +45,17 @@ def build_metrics_summary(
     kernel_version: int | None = None,
     started_at: str | None = None,
     completed_at: str | None = None,
+    extras: dict | None = None,
 ) -> dict:
     """Convert raw HuggingFace training outputs into the agent-facing schema.
 
     Uses .get() with fallbacks throughout: HF Trainer.metrics key names
     drift across transformers versions, and a missing field should degrade
     to null rather than crash the whole results fetch.
+
+    `extras` carries the reports a run writes beyond HF's own metrics (run
+    info, run report, adapter evaluation, environment, upload outcome); see
+    collect_run_extras(). They are merged in as additional top-level keys.
     """
     duration_s = None
     if started_at and completed_at:
@@ -77,7 +82,7 @@ def build_metrics_summary(
         if final_epoch is None and training_log:
             final_epoch = training_log[-1].get("epoch")
 
-    return {
+    summary = {
         "schema_version": 1,
         "status": status,
         "kernel_slug": kernel_slug,
@@ -95,6 +100,40 @@ def build_metrics_summary(
         ],
         "raw_hf_metrics": training_metrics,
     }
+    if extras:
+        summary.update(extras)
+    return summary
+
+
+def collect_run_extras(root: Path) -> dict:
+    """Pick up the reports train_kernel.py writes next to the training
+    metrics. Anything missing is simply absent (a smoke run has no upload,
+    a failed evaluation has no adapter_eval.json)."""
+    extras: dict = {}
+
+    run_info = _find_json(root, "training_run_info.json")
+    if run_info:
+        extras["run_info"] = run_info
+
+    run_report = _find_json(root, "run_report.json")
+    if run_report:
+        extras["run_report"] = run_report
+
+    adapter_eval = _find_json(root, "adapter_eval.json")
+    if adapter_eval:
+        extras["adapter_eval"] = adapter_eval
+
+    environment = _find_json(root, "environment.json")
+    if environment:
+        extras["environment"] = {
+            key: environment.get(key) for key in ("python", "git_commit", "packages", "gpu", "data_files")
+        }
+
+    upload = _find_json(root, "hf_upload.json")
+    if upload:
+        extras["hf_upload"] = upload
+
+    return extras
 
 
 def assert_real_training_occurred(summary: dict) -> None:
@@ -192,6 +231,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--status", default="complete", choices=["complete", "error", "timeout"])
     p.add_argument("--kernel-version", type=int, default=None)
     p.add_argument("--started-at", default=None, help="ISO8601 timestamp")
+    p.add_argument(
+        "--logs-only", action="store_true",
+        help="Only download the kernel output and log into .kaggle_output, write no results, "
+             "and exit 0 even if the download fails. For diagnosing a failed run.",
+    )
     return p.parse_args()
 
 
@@ -203,11 +247,22 @@ def main() -> None:
     completed_at = datetime.now(timezone.utc).isoformat()
 
     DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+    if args.logs_only:
+        try:
+            api = _get_kaggle_api()
+            logger.info(f"Downloading kernel output and log for '{slug}' into {DOWNLOAD_DIR}...")
+            api.kernels_output(slug, path=str(DOWNLOAD_DIR), force=True)
+        except (Exception, SystemExit) as e:
+            logger.warning(f"Could not download kernel output: {e}")
+        return
+
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     HISTORY_DIR.mkdir(parents=True, exist_ok=True)
 
     training_metrics: dict = {}
     training_log: list[dict] = []
+    extras: dict = {}
 
     try:
         api = _get_kaggle_api()
@@ -216,6 +271,7 @@ def main() -> None:
 
         training_metrics = _find_json(DOWNLOAD_DIR, "training_metrics.json") or {}
         training_log = _find_json(DOWNLOAD_DIR, "training_log.json") or []
+        extras = collect_run_extras(DOWNLOAD_DIR)
     except Exception as e:
         logger.error(f"Failed to download/parse Kaggle kernel output: {e}")
 
@@ -228,6 +284,7 @@ def main() -> None:
         kernel_version=args.kernel_version,
         started_at=args.started_at,
         completed_at=completed_at,
+        extras=extras,
     )
     if not training_metrics and not training_log:
         summary["note"] = "training_metrics.json/training_log.json not found in kernel output"

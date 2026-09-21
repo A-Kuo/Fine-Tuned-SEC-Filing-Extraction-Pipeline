@@ -6,13 +6,17 @@ This is the primary remote training path; local GPU training via
 `make train` is the fallback when Kaggle is unavailable.
 
 Requires KAGGLE_USERNAME + KAGGLE_KEY in .env (or ~/.kaggle/kaggle.json).
-Requires DAGSHUB_USER_TOKEN and HF_TOKEN configured as Kaggle Notebook
-secrets (Kaggle UI -> Notebook -> Add-ons -> Secrets) so the kernel can
-authenticate to DagsHub/MLFlow and HuggingFace.
+Requires HF_TOKEN configured as a Kaggle Notebook secret (Kaggle UI ->
+Notebook -> Add-ons -> Secrets) so the kernel can download the gated base
+model. Optional secrets (HF_WRITE_TOKEN, HF_ADAPTER_REPO, MLFLOW_TRACKING_URI,
+DAGSHUB_USER_TOKEN) are listed in scripts/kaggle_kernel/train_kernel.py.
 
 Usage:
-    # Push and wait for the training kernel to complete
+    # Push and wait for the training kernel to complete (full training run)
     python scripts/submit_kaggle_job.py --wait
+
+    # A short end-to-end check first: 8 examples, 1 epoch, no upload
+    python scripts/submit_kaggle_job.py --wait --mode smoke
 
     # Push without waiting (check status later)
     python scripts/submit_kaggle_job.py
@@ -24,7 +28,10 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import re
+import shutil
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -34,6 +41,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from src.core.config import load_config
 
 KERNEL_DIR = Path(__file__).parent / "kaggle_kernel"
+RUN_MODES = ("smoke", "full")
+_RUN_MODE_LINE = re.compile(r'^RUN_MODE = "[^"]*"', re.MULTILINE)
 
 
 def _get_kaggle_api():
@@ -73,10 +82,38 @@ def kernel_slug(config: dict) -> str:
     return slug
 
 
-def push_kernel(api, config: dict) -> str:
+def prepare_kernel_dir(mode: str) -> Path:
+    """A throwaway copy of the kernel folder with RUN_MODE set to `mode`.
+
+    Kaggle uploads only the metadata and the code file, so the mode has to be
+    written into the code itself; a sidecar config file would never arrive.
+    The checked-in train_kernel.py is left untouched.
+    """
+    if mode not in RUN_MODES:
+        raise ValueError(f"mode must be one of {RUN_MODES}, got {mode!r}")
+
+    meta = (KERNEL_DIR / "kernel-metadata.json").read_text(encoding="utf-8")
+    code = (KERNEL_DIR / "train_kernel.py").read_text(encoding="utf-8")
+    patched, count = _RUN_MODE_LINE.subn(f'RUN_MODE = "{mode}"', code)
+    if count != 1:
+        raise RuntimeError(
+            f"Expected exactly one RUN_MODE assignment in train_kernel.py, found {count}"
+        )
+
+    tmp = Path(tempfile.mkdtemp(prefix="kaggle_kernel_"))
+    (tmp / "kernel-metadata.json").write_text(meta, encoding="utf-8")
+    (tmp / "train_kernel.py").write_text(patched, encoding="utf-8")
+    return tmp
+
+
+def push_kernel(api, config: dict, mode: str = "full") -> str:
     slug = kernel_slug(config)
-    logger.info(f"Pushing training kernel '{slug}' to Kaggle...")
-    api.kernels_push(str(KERNEL_DIR))
+    logger.info(f"Pushing training kernel '{slug}' to Kaggle (mode={mode})...")
+    kernel_dir = prepare_kernel_dir(mode)
+    try:
+        api.kernels_push(str(kernel_dir))
+    finally:
+        shutil.rmtree(kernel_dir, ignore_errors=True)
     logger.info("Kernel pushed. Kaggle will now provision a GPU instance and run it.")
     return slug
 
@@ -110,6 +147,10 @@ def parse_args() -> argparse.Namespace:
                    help="Only check status of the existing kernel; do not push")
     p.add_argument("--poll-interval", type=int, default=30, dest="poll_interval")
     p.add_argument("--timeout", type=int, default=7200)
+    p.add_argument(
+        "--mode", choices=RUN_MODES, default="full",
+        help="smoke = 8 examples, 1 epoch, no upload; full = the whole training run (default)",
+    )
     return p.parse_args()
 
 
@@ -121,7 +162,7 @@ def main() -> None:
     slug = kernel_slug(config)
 
     if not args.status_only:
-        push_kernel(api, config)
+        push_kernel(api, config, args.mode)
 
     if args.wait or args.status_only:
         final_state = poll_status(api, slug, args.poll_interval, args.timeout)

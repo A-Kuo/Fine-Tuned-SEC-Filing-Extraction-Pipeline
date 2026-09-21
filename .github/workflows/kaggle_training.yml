@@ -3,6 +3,17 @@ name: Kaggle QLoRA Training
 on:
   workflow_dispatch:
     inputs:
+      mode:
+        description: "smoke = 8 examples, 1 epoch, no upload (minutes, checks every stage); full = the whole training run"
+        type: choice
+        options:
+          - smoke
+          - full
+        default: smoke
+      commit_results:
+        description: "Commit notebooks/results/ to main after a FULL run succeeds (off by default)"
+        type: boolean
+        default: false
       notes:
         description: "Optional note for this training run"
         required: false
@@ -36,7 +47,8 @@ jobs:
         env:
           KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
           KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
-        run: python scripts/submit_kaggle_job.py --wait
+          RUN_MODE: ${{ inputs.mode }}
+        run: python scripts/submit_kaggle_job.py --wait --mode "$RUN_MODE"
 
       - name: Fetch results from Kaggle
         env:
@@ -44,15 +56,28 @@ jobs:
           KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
         run: python scripts/fetch_kaggle_results.py --status complete
 
-      - name: Upload full raw output (weights, logs) as workflow artifact
+      # The step above is skipped when the kernel fails, which used to throw
+      # the kernel log away exactly when it is needed to diagnose the failure.
+      - name: Fetch kernel log and output after a failure
+        if: failure()
+        env:
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+          KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+        run: python scripts/fetch_kaggle_results.py --logs-only
+
+      - name: Upload run output (adapter, logs, reports) as workflow artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: kaggle-training-output
-          path: .kaggle_output/
+          path: |
+            .kaggle_output/
+            notebooks/results/
           retention-days: 14
 
+      # Results only land on main when explicitly requested for a full run.
       - name: Commit results to repo
+        if: ${{ success() && inputs.mode == 'full' && inputs.commit_results }}
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"

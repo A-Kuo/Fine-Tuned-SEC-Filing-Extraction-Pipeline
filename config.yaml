@@ -53,9 +53,19 @@ training:
   seed: 42
   output_dir: "models/llama-sec-v1"
 
-# Experiment tracking + model registry (DagsHub-hosted MLFlow)
+# Experiment tracking. Empty tracking_uri = a local file store under the
+# training output dir, which needs no credentials and cannot fail a run. Set
+# it (or the MLFLOW_TRACKING_URI env var, which overrides it) to log to any
+# remote MLFlow server: DagsHub, a SageMaker-hosted server, or one
+# self-hosted on Kubernetes. Credentials for a remote server come from
+# MLflow's own MLFLOW_TRACKING_USERNAME/PASSWORD/TOKEN variables.
 mlflow:
-  tracking_uri: "https://dagshub.com/A-Kuo/Fine-Tuned-SEC-Filing-Extraction-Pipeline.mlflow"
+  tracking_uri: ""
+  # Register the adapter in the server's model registry after training.
+  # Only applies to a remote/DB-backed tracking store (a local file store has
+  # no registry). A registration failure never fails the training run.
+  register_model: false
+  # DagsHub is only used when tracking_uri is empty AND DAGSHUB_USER_TOKEN is set.
   dagshub_repo_owner: "A-Kuo"
   dagshub_repo_name: "Fine-Tuned-SEC-Filing-Extraction-Pipeline"
   experiment_name: "sec-extraction-qlora"
@@ -72,6 +82,15 @@ kaggle:
   kernel_slug: "augustinekuo/findoc-qlora-train"
   use_local_if_unavailable: true
   local_fallback: "data/sec_filings_train.jsonl"
+
+# Where the trained adapter is published after a full Kaggle run. Leave
+# adapter_repo empty to skip the upload (the run report then says so). Needs a
+# write-scoped token in HF_WRITE_TOKEN (Kaggle Secrets); HF_TOKEN is used if
+# it is write-scoped. Keep the repo private until the Llama 3.1 license terms
+# for publishing derivatives have been reviewed.
+huggingface:
+  adapter_repo: ""
+  private: true
 
 serving:
   host: "0.0.0.0"

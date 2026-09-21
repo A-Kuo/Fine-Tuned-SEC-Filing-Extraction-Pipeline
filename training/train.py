@@ -34,19 +34,22 @@ Usage:
 
 Runs locally by default (GPU required). Dataset is pulled from the Kaggle
 dataset configured in config.yaml -> kaggle.dataset_id when available,
-falling back to the local JSONL path otherwise. All runs are logged to
-MLFlow (tracking server hosted on DagsHub); see configure_mlflow(). To run
-training on Kaggle's hosted GPU compute instead, use
-scripts/submit_kaggle_job.py.
+falling back to the local JSONL path otherwise. Runs are tracked with MLFlow:
+a local file store by default, or any remote server via MLFLOW_TRACKING_URI
+(see configure_mlflow()). To run training on Kaggle's hosted GPU compute
+instead, use scripts/submit_kaggle_job.py.
 """
 
 import argparse
+import hashlib
 import inspect
 import json
 import os
 import sys
-from datetime import datetime
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 import mlflow
 import torch
@@ -74,16 +77,61 @@ from training.callbacks import MetricsCallback, EarlyStoppingOnLoss
 from training.data_collator import FinancialDataCollator
 
 
-def configure_mlflow(config: dict) -> None:
-    """Point MLFlow tracking at the DagsHub-hosted server for this repo.
+_REMOTE_URI_PREFIXES = ("http://", "https://", "databricks", "sqlite:", "postgresql", "mysql", "mssql")
 
-    DAGSHUB_USER_TOKEN (from .env) authenticates non-interactively via
-    dagshub.init(). Without it, dagshub.init() falls back to an interactive
-    browser OAuth flow that blocks for minutes and cannot succeed on a
-    headless box (e.g. a Kaggle kernel) — so that path is skipped entirely
-    when the token isn't set, going straight to unauthenticated tracking.
+
+@dataclass
+class TrackingInfo:
+    """Where this run's MLFlow data goes, and whether that store can hold a
+    model registry (a plain local file store cannot)."""
+
+    uri: str
+    kind: str  # "remote" or "local"
+
+    @property
+    def registry_capable(self) -> bool:
+        return self.kind == "remote"
+
+
+def _redact_uri(uri: str) -> str:
+    """Drop any user:password@ from a tracking URI before it is logged or
+    written into a report."""
+    parts = urlsplit(uri)
+    if parts.username or parts.password:
+        host = parts.hostname or ""
+        if parts.port:
+            host = f"{host}:{parts.port}"
+        parts = parts._replace(netloc=host)
+    return urlunsplit(parts)
+
+
+def configure_mlflow(config: dict, output_dir: str) -> TrackingInfo:
+    """Choose where MLFlow tracking goes, without ever making it a reason for
+    training to fail.
+
+    Precedence:
+      1. mlflow.tracking_uri in config.yaml, which MLFLOW_TRACKING_URI
+         overrides (src/core/config.py). Any remote MLFlow server works here
+         (DagsHub, a SageMaker-hosted server, one self-hosted on Kubernetes);
+         credentials come from MLflow's own MLFLOW_TRACKING_* variables.
+      2. DagsHub via dagshub.init(), only when DAGSHUB_USER_TOKEN is set
+         (without a token dagshub.init() falls back to an interactive browser
+         OAuth flow that blocks forever on a headless box such as Kaggle).
+      3. A local file store under the output directory.
+
+    The old behavior of pointing at the DagsHub server with no credentials is
+    gone: it failed authentication inside mlflow.start_run(), before any
+    training step, on exactly the machines (Kaggle) this pipeline targets.
     """
     mlflow_cfg = config["mlflow"]
+
+    explicit = (mlflow_cfg.get("tracking_uri") or "").strip()
+    if explicit:
+        mlflow.set_tracking_uri(explicit)
+        mlflow.set_experiment(mlflow_cfg["experiment_name"])
+        kind = "remote" if explicit.startswith(_REMOTE_URI_PREFIXES) else "local"
+        logger.info(f"MLFlow tracking: {_redact_uri(explicit)} ({kind})")
+        return TrackingInfo(explicit, kind)
 
     if os.environ.get("DAGSHUB_USER_TOKEN"):
         try:
@@ -95,17 +143,20 @@ def configure_mlflow(config: dict) -> None:
                 mlflow=True,
             )
             mlflow.set_experiment(mlflow_cfg["experiment_name"])
-            return
+            uri = mlflow.get_tracking_uri()
+            logger.info(f"MLFlow tracking: DagsHub ({_redact_uri(uri)})")
+            return TrackingInfo(uri, "remote")
         except Exception as e:
-            logger.warning(f"dagshub.init() failed ({e}); falling back to MLFLOW_TRACKING_URI")
-    else:
-        logger.warning(
-            "DAGSHUB_USER_TOKEN not set; skipping DagsHub auth. "
-            "Set it in .env to log runs to the shared MLFlow experiment."
-        )
+            logger.warning(f"dagshub.init() failed ({e}); using a local MLFlow store instead")
 
-    mlflow.set_tracking_uri(mlflow_cfg["tracking_uri"])
+    local_uri = (Path(output_dir).resolve() / "mlruns").as_uri()
+    mlflow.set_tracking_uri(local_uri)
     mlflow.set_experiment(mlflow_cfg["experiment_name"])
+    logger.info(
+        f"MLFlow tracking: local file store at {local_uri}. Set MLFLOW_TRACKING_URI "
+        "(or mlflow.tracking_uri in config.yaml) to log to a remote server instead."
+    )
+    return TrackingInfo(local_uri, "local")
 
 
 def resolve_dataset_path(config: dict, override_path: str | None = None) -> str:
@@ -366,7 +417,7 @@ def formatting_func(example: dict) -> str:
     )
 
 
-def create_training_args(config: dict, output_dir: str) -> SFTConfig:
+def create_training_args(config: dict, output_dir: str, report_to_mlflow: bool = False) -> SFTConfig:
     """Build the SFTConfig, tolerating TRL's renamed arguments.
 
     TRL renamed SFTConfig's `max_seq_length` to `max_length`; which spelling is
@@ -378,10 +429,12 @@ def create_training_args(config: dict, output_dir: str) -> SFTConfig:
     train_cfg = config["training"]
     max_seq_length = config["model"]["max_seq_length"]
 
-    # MLflow tracking points at the DagsHub-hosted server, which needs a token.
-    # Without one the callback still fires on every logging step and fails, so
-    # on Kaggle (no token) we don't report at all.
-    report_to = ["mlflow"] if os.environ.get("DAGSHUB_USER_TOKEN") else []
+    # Only stream per-step metrics to MLflow when tracking is a remote server
+    # (configure_mlflow() returns kind == "remote"); the HF callback fires on
+    # every logging step, so a store that rejects writes would fail the run.
+    # The default local file store still records the run's params and the
+    # final metrics from train().
+    report_to = ["mlflow"] if report_to_mlflow else []
 
     candidate_kwargs = {
         "output_dir": output_dir,
@@ -425,6 +478,107 @@ def create_training_args(config: dict, output_dir: str) -> SFTConfig:
     args._n_gpu = 1
 
     return args
+
+
+def _sha256_file(path: str) -> str | None:
+    try:
+        digest = hashlib.sha256()
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+    except OSError:
+        return None
+
+
+def finish_mlflow_run(tracking: TrackingInfo, mlflow_cfg: dict, run_id: str, out_dir: str, metrics: dict) -> dict:
+    """MLFlow bookkeeping after the adapter is safely on disk. Never raises;
+    returns what happened so the caller can record it.
+
+    A plain local file store keeps run data only: it has no model registry
+    and copying an ~85 MB adapter into it would just duplicate the output, so
+    artifacts and registration are skipped there. Registration also needs
+    mlflow.register_model to be turned on in config.yaml.
+    """
+    status = {
+        "tracking": tracking.kind,
+        "tracking_uri": _redact_uri(tracking.uri),
+        "metrics_logged": "failed",
+        "artifacts": "skipped: local file store keeps run data only",
+        "registry": "skipped: local file store has no model registry",
+    }
+
+    try:
+        numeric = {
+            k: float(v) for k, v in metrics.items()
+            if isinstance(v, (int, float)) and not isinstance(v, bool)
+        }
+        mlflow.log_metrics(numeric)
+        status["metrics_logged"] = "ok"
+    except Exception as e:
+        logger.warning(f"MLFlow metric logging failed ({e}); the run itself is unaffected")
+        status["metrics_logged"] = f"failed: {e}"
+
+    if not tracking.registry_capable:
+        return status
+
+    try:
+        mlflow.log_artifacts(out_dir, artifact_path="adapter")
+        status["artifacts"] = "ok"
+    except Exception as e:
+        logger.warning(f"MLFlow artifact upload failed ({e}); the adapter is still saved at {out_dir}")
+        status["artifacts"] = f"failed: {e}"
+
+    if not mlflow_cfg.get("register_model", False):
+        status["registry"] = "skipped: mlflow.register_model is false"
+        return status
+
+    try:
+        mlflow.register_model(f"runs:/{run_id}/adapter", name=mlflow_cfg["registered_model_name"])
+        status["registry"] = "registered"
+    except Exception as e:
+        logger.warning(f"MLFlow model registration failed ({e}); the adapter is still saved at {out_dir}")
+        status["registry"] = f"failed: {e}"
+
+    return status
+
+
+def build_run_info(
+    *,
+    config: dict,
+    model_name: str,
+    data_path: str,
+    mlflow_status: dict,
+    train_examples: int,
+    trainable: int,
+    total: int,
+) -> dict:
+    """Provenance for this run, written next to the adapter as
+    training_run_info.json so results can always be traced to what produced
+    them (base model, exact dataset hash, sizes, hardware, tracking outcome)."""
+    train_cfg = config["training"]
+    info = {
+        "schema_version": 1,
+        "finished_at": datetime.now(timezone.utc).isoformat(),
+        "base_model": model_name,
+        "dataset_path": data_path,
+        "dataset_sha256": _sha256_file(data_path),
+        "train_examples": train_examples,
+        "max_seq_length": config["model"]["max_seq_length"],
+        "num_epochs": train_cfg["num_epochs"],
+        "per_device_batch_size": train_cfg["batch_size"],
+        "gradient_accumulation_steps": train_cfg["gradient_accumulation_steps"],
+        "effective_batch_size": train_cfg["batch_size"] * train_cfg["gradient_accumulation_steps"],
+        "learning_rate": float(train_cfg["learning_rate"]),
+        "lora_r": config["lora"]["r"],
+        "trainable_params": trainable,
+        "total_params": total,
+        "mlflow": mlflow_status,
+    }
+    if torch.cuda.is_available():
+        info["gpu"] = torch.cuda.get_device_name(0)
+        info["peak_gpu_memory_gb"] = round(torch.cuda.max_memory_allocated() / 1e9, 2)
+    return info
 
 
 def train(
@@ -484,9 +638,9 @@ def train(
     logger.info(f"LoRA rank:       {config['lora']['r']}")
     logger.info("=" * 60)
 
-    configure_mlflow(config)
+    tracking = configure_mlflow(config, out_dir)
     mlflow_cfg = config["mlflow"]
-    run_name = f"{mlflow_cfg['run_name_prefix']}-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}"
+    run_name = f"{mlflow_cfg['run_name_prefix']}-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
 
     with mlflow.start_run(run_name=run_name) as run:
         mlflow.log_params({
@@ -525,7 +679,9 @@ def train(
         dataset = to_text_dataset(dataset, tokenizer)
 
         # ── Step 5: Training arguments ──
-        training_args = create_training_args(config, out_dir)
+        training_args = create_training_args(
+            config, out_dir, report_to_mlflow=(tracking.kind == "remote")
+        )
 
         # ── Step 6: SFTTrainer ──
         trainer = SFTTrainer(
@@ -554,17 +710,28 @@ def train(
         with open(metrics_path, "w") as f:
             json.dump(metrics, f, indent=2)
 
-        # ── Step 9: Log adapter to MLFlow + register in model registry ──
-        mlflow.log_artifacts(out_dir, artifact_path="adapter")
-        mlflow.register_model(
-            f"runs:/{run.info.run_id}/adapter",
-            name=mlflow_cfg["registered_model_name"],
-        )
+        # ── Step 9: MLFlow bookkeeping ──
+        # The adapter and metrics are already on disk, so nothing in here may
+        # fail the run. Outcomes are recorded in training_run_info.json below
+        # instead of being swallowed.
+        mlflow_status = finish_mlflow_run(tracking, mlflow_cfg, run.info.run_id, out_dir, metrics)
+
+    run_info = build_run_info(
+        config=config,
+        model_name=model_name,
+        data_path=data_path,
+        mlflow_status=mlflow_status,
+        train_examples=len(dataset),
+        trainable=trainable,
+        total=total,
+    )
+    with open(Path(out_dir) / "training_run_info.json", "w") as f:
+        json.dump(run_info, f, indent=2)
 
     logger.info(f"Training complete. Metrics: {metrics}")
     logger.info(f"Adapter saved to: {out_dir}")
     logger.info(f"Adapter size: {sum(f.stat().st_size for f in Path(out_dir).rglob('*') if f.is_file()) / 1e6:.1f} MB")
-    logger.info(f"MLFlow run: {mlflow_cfg['tracking_uri']}")
+    logger.info(f"MLFlow: {mlflow_status}")
 
     return metrics
 

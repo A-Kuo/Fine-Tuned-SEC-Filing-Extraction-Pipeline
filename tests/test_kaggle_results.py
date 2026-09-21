@@ -6,6 +6,7 @@ layer talks to the live Kaggle API and is intentionally out of scope here
 mock-only convention).
 """
 
+import json
 import sys
 from pathlib import Path
 
@@ -13,7 +14,13 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from scripts.fetch_kaggle_results import build_metrics_summary, _downsample, assert_real_training_occurred
+import scripts.fetch_kaggle_results as fetch
+from scripts.fetch_kaggle_results import (
+    build_metrics_summary,
+    _downsample,
+    assert_real_training_occurred,
+    collect_run_extras,
+)
 
 
 def _log(n: int) -> list[dict]:
@@ -158,6 +165,95 @@ class TestAssertRealTrainingOccurred:
         )
         assert "note" not in summary
         assert_real_training_occurred(summary)  # must not raise
+
+
+class TestExtras:
+    def test_extras_are_merged_as_top_level_keys(self):
+        summary = build_metrics_summary(
+            {"train_loss": 0.4}, _log(10),
+            status="complete", kernel_slug="u/s", git_commit_sha="abc123",
+            extras={"adapter_eval": {"n_examples": 30}, "run_info": {"train_examples": 90}},
+        )
+        assert summary["adapter_eval"] == {"n_examples": 30}
+        assert summary["run_info"] == {"train_examples": 90}
+        assert summary["final_train_loss"] == 0.4
+
+    def test_no_extras_leaves_the_original_schema_unchanged(self):
+        summary = build_metrics_summary(
+            {}, [], status="complete", kernel_slug="u/s", git_commit_sha="abc123",
+        )
+        assert "adapter_eval" not in summary and "run_info" not in summary
+
+
+class TestCollectRunExtras:
+    def _write(self, root, relative, payload):
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload))
+
+    def test_reports_are_found_wherever_the_kernel_put_them(self, tmp_path):
+        self._write(tmp_path, "repo/models/llama-sec-v1/training_run_info.json", {"train_examples": 90})
+        self._write(tmp_path, "reports/run_report.json", {"mode": "full"})
+        self._write(tmp_path, "reports/adapter_eval.json", {"n_examples": 30})
+        self._write(tmp_path, "reports/hf_upload.json", {"status": "uploaded"})
+        self._write(tmp_path, "reports/environment.json", {
+            "python": "3.12.1", "git_commit": "abc", "packages": {"trl": "0.12.2"},
+            "gpu": {"name": "Tesla T4"}, "data_files": {}, "collected_at": "2026-09-20T00:00:00Z",
+        })
+
+        extras = collect_run_extras(tmp_path)
+
+        assert extras["run_info"] == {"train_examples": 90}
+        assert extras["run_report"] == {"mode": "full"}
+        assert extras["adapter_eval"] == {"n_examples": 30}
+        assert extras["hf_upload"] == {"status": "uploaded"}
+        assert extras["environment"]["packages"] == {"trl": "0.12.2"}
+        assert "collected_at" not in extras["environment"]
+
+    def test_missing_reports_are_simply_absent(self, tmp_path):
+        self._write(tmp_path, "reports/run_report.json", {"mode": "smoke"})
+        assert set(collect_run_extras(tmp_path)) == {"run_report"}
+
+
+class TestLogsOnly:
+    """The workflow runs this even after a failed kernel, so it must never
+    write results or exit non-zero."""
+
+    def _run(self, monkeypatch, tmp_path, api):
+        monkeypatch.setattr(fetch, "DOWNLOAD_DIR", tmp_path / "out")
+        monkeypatch.setattr(fetch, "RESULTS_DIR", tmp_path / "results")
+        monkeypatch.setattr(fetch, "HISTORY_DIR", tmp_path / "results" / "history")
+        monkeypatch.setattr(fetch, "_get_kaggle_api", lambda: api)
+        monkeypatch.setattr(sys, "argv", ["fetch_kaggle_results.py", "--logs-only", "--kernel-slug", "u/s"])
+        fetch.main()
+
+    def test_downloads_output_and_writes_no_results(self, monkeypatch, tmp_path):
+        calls = []
+
+        class Api:
+            def kernels_output(self, slug, path, force):
+                calls.append((slug, path, force))
+
+        self._run(monkeypatch, tmp_path, Api())
+
+        assert calls == [("u/s", str(tmp_path / "out"), True)]
+        assert not (tmp_path / "results").exists()
+
+    def test_a_download_failure_is_a_warning_not_an_exit(self, monkeypatch, tmp_path):
+        class Api:
+            def kernels_output(self, slug, path, force):
+                raise RuntimeError("kernel never started")
+
+        self._run(monkeypatch, tmp_path, Api())  # must not raise
+
+    def test_a_kaggle_auth_exit_is_also_swallowed(self, monkeypatch, tmp_path):
+        def failing_api():
+            raise SystemExit("Kaggle authentication failed")
+
+        monkeypatch.setattr(fetch, "DOWNLOAD_DIR", tmp_path / "out")
+        monkeypatch.setattr(fetch, "_get_kaggle_api", failing_api)
+        monkeypatch.setattr(sys, "argv", ["fetch_kaggle_results.py", "--logs-only", "--kernel-slug", "u/s"])
+        fetch.main()  # must not raise
 
 
 if __name__ == "__main__":
