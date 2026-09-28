@@ -1,0 +1,125 @@
+# Backfills the new edgar.* schema (entities, filings -- see
+# db/migrations/0010_edgar_filings.sql) with real SEC EDGAR filing metadata,
+# for the dashboard's Regulatory Filings tab. See
+# scripts/backfill_edgar_filings.py's module docstring for exactly what is
+# fetched and why every field but `status` is read verbatim off EDGAR's own
+# response rather than derived or guessed.
+#
+# Manual-dispatch only (unlike backfill_live_schema.yml, which runs on every
+# relevant push): this hits real SEC infrastructure for every company in
+# scope and grows monotonically, so it should be a deliberate action, not
+# something that fires on an unrelated code change. `limit_companies` and
+# `dry_run` are exposed as dispatch inputs specifically so the ~50-company
+# proof run can be re-run safely before scaling up.
+#
+# Does NOT apply db/migrations/0010_edgar_filings.sql -- that must already
+# be applied (via supabase_sync.yml or manually) before this runs; the
+# "Check the edgar schema exists" step below fails fast and clearly if not.
+#
+# Required repository secrets: same as backfill_live_schema.yml
+# (SUPABASE_DB_HOST/PORT/USER/PASSWORD/NAME, mapped below to POSTGRES_*).
+#
+# Every write is an idempotent upsert (ON CONFLICT on cik / accession_no),
+# so re-running this against the same companies is always safe.
+
+name: Backfill EDGAR Filings
+
+on:
+  workflow_dispatch:
+    inputs:
+      limit_companies:
+        description: "How many tickers to backfill (ignored if tickers is set)"
+        required: false
+        default: "50"
+      tickers:
+        description: "Explicit space-separated ticker list, overrides limit_companies"
+        required: false
+        default: ""
+      dry_run:
+        description: "Fetch and log only -- write nothing to Postgres"
+        type: boolean
+        default: false
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    env:
+      POSTGRES_HOST: ${{ secrets.SUPABASE_DB_HOST }}
+      POSTGRES_PORT: ${{ secrets.SUPABASE_DB_PORT }}
+      POSTGRES_USER: ${{ secrets.SUPABASE_DB_USER }}
+      POSTGRES_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      POSTGRES_DB: ${{ secrets.SUPABASE_DB_NAME }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check required secrets are configured
+        run: |
+          set -euo pipefail
+          if [ -z "${POSTGRES_HOST:-}" ]; then
+            echo "::error::SUPABASE_DB_HOST secret is not set."
+            exit 1
+          fi
+          if [ -z "${POSTGRES_PASSWORD:-}" ]; then
+            echo "::error::SUPABASE_DB_PASSWORD secret is not set."
+            exit 1
+          fi
+          echo "POSTGRES_PORT=${POSTGRES_PORT:-5432}" >> "$GITHUB_ENV"
+          echo "POSTGRES_USER=${POSTGRES_USER:-postgres}" >> "$GITHUB_ENV"
+          echo "POSTGRES_DB=${POSTGRES_DB:-postgres}" >> "$GITHUB_ENV"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements-ci.txt') }}
+          restore-keys: ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-ci.txt
+
+      - name: Check the edgar schema exists (0010_edgar_filings.sql applied?)
+        run: |
+          python - <<'PYEOF'
+          import os
+          import sys
+
+          import psycopg2
+
+          conn = psycopg2.connect(
+              host=os.environ["POSTGRES_HOST"],
+              port=int(os.environ["POSTGRES_PORT"]),
+              user=os.environ["POSTGRES_USER"],
+              password=os.environ["POSTGRES_PASSWORD"],
+              dbname=os.environ["POSTGRES_DB"],
+          )
+          with conn.cursor() as cur:
+              cur.execute("SELECT to_regclass('edgar.filings')")
+              if cur.fetchone()[0] is None:
+                  print("::error::edgar.filings does not exist -- apply db/migrations/0010_edgar_filings.sql first.")
+                  sys.exit(1)
+          conn.close()
+          print("edgar schema found.")
+          PYEOF
+
+      - name: Backfill edgar.entities / edgar.filings with real SEC EDGAR data
+        run: |
+          set -euo pipefail
+          args=(--limit-companies "${{ inputs.limit_companies }}")
+          if [ -n "${{ inputs.tickers }}" ]; then
+            args=(--tickers ${{ inputs.tickers }})
+          fi
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            args+=(--dry-run)
+          fi
+          python scripts/backfill_edgar_filings.py "${args[@]}"
+
+      - name: Verify (row counts, real sample rows to spot-check on EDGAR)
+        if: ${{ inputs.dry_run != 'true' }}
+        run: python scripts/verify_edgar_backfill.py --sample 15

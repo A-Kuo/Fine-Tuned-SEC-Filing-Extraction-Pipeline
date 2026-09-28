@@ -102,3 +102,63 @@ class TestViewPerfMigration:
 
     def test_supabase_mirror_is_byte_identical(self):
         _assert_mirrors_match("0009_view_perf.sql")
+
+
+class TestEdgarFilingsMigration:
+    def _read(self) -> str:
+        return (REPO_ROOT / "db" / "migrations" / "0010_edgar_filings.sql").read_text(encoding="utf-8")
+
+    def test_creates_the_edgar_schema_and_core_tables(self):
+        sql = self._read().lower()
+        assert "create schema if not exists edgar" in sql
+        assert "create table if not exists edgar.entities" in sql
+        assert "create table if not exists edgar.filings" in sql
+        assert "create table if not exists edgar.ingest_runs" in sql
+
+    def test_entities_has_no_fabricated_sic_lookup_table(self):
+        """The design choice being tested: no separately-curated SIC-code
+        seed table. sic_description lives on edgar.entities itself, sourced
+        per-company from the real submissions API response."""
+        sql = self._read().lower()
+        assert "edgar.sic_codes" not in sql
+        assert "sic_description" in sql
+
+    def test_filings_references_entities_and_has_a_status_column(self):
+        sql = self._read().lower()
+        assert "references edgar.entities(cik)" in sql
+        assert "status varchar(16) not null" in sql
+
+    def test_indexes_cover_the_real_query_patterns(self):
+        sql = self._read().lower()
+        assert "create index if not exists idx_edgar_filings_date on edgar.filings (filing_date desc)" in sql
+        assert "create index if not exists idx_edgar_filings_cik_date on edgar.filings (cik, filing_date desc)" in sql
+        assert "create index if not exists idx_edgar_filings_form_date on edgar.filings (form, filing_date desc)" in sql
+
+    def test_sic_division_uses_the_standard_ten_way_ranges(self):
+        """The stable US Census/OSHA SIC division ranges (A-J), computed
+        directly from the numeric code rather than joined against a table."""
+        sql = self._read().lower()
+        assert "function edgar.sic_division" in sql
+        for division, low, high in [
+            ("'a'", 100, 999), ("'b'", 1000, 1499), ("'c'", 1500, 1799),
+            ("'d'", 2000, 3999), ("'e'", 4000, 4999), ("'f'", 5000, 5199),
+            ("'g'", 5200, 5999), ("'h'", 6000, 6799), ("'i'", 7000, 8999),
+            ("'j'", 9100, 9999),
+        ]:
+            assert f"between {low} and {high} then {division}" in sql
+
+    def test_ledger_view_joins_filings_to_entities_and_exposes_division(self):
+        sql = self._read().lower()
+        assert "create or replace view edgar.v_filings_ledger" in sql
+        assert "join edgar.entities e on e.cik = f.cik" in sql
+        assert "edgar.sic_division(e.sic) as sic_division" in sql
+
+    def test_rls_enabled_with_idempotent_service_role_policies(self):
+        sql = self._read().lower()
+        for table in ("edgar.entities", "edgar.filings", "edgar.ingest_runs"):
+            name = table.replace(".", "_")
+            assert f"alter table {table} enable row level security" in sql
+            assert f'drop policy if exists "service_role_full_access_{name}" on {table} cascade' in sql
+
+    def test_supabase_mirror_is_byte_identical(self):
+        _assert_mirrors_match("0010_edgar_filings.sql")
