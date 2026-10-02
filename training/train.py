@@ -117,11 +117,21 @@ def configure_mlflow(config: dict, output_dir: str) -> TrackingInfo:
       2. DagsHub via dagshub.init(), only when DAGSHUB_USER_TOKEN is set
          (without a token dagshub.init() falls back to an interactive browser
          OAuth flow that blocks forever on a headless box such as Kaggle).
-      3. A local file store under the output directory.
+      3. A local SQLite store under the output directory.
 
     The old behavior of pointing at the DagsHub server with no credentials is
     gone: it failed authentication inside mlflow.start_run(), before any
     training step, on exactly the machines (Kaggle) this pipeline targets.
+
+    The local fallback is SQLite, not a plain file:// store: newer MLflow
+    releases put the filesystem tracking backend into "maintenance mode" and
+    raise MlflowException on every use unless MLFLOW_ALLOW_FILE_STORE is set
+    -- confirmed on a real Kaggle run (2026-10-02), which crashed here before
+    any GPU training step. SQLite needs no server process, so it keeps this
+    branch's zero-configuration guarantee; it is still classified "local"
+    (not registry-capable) below regardless of the URI scheme, since an
+    ephemeral per-run database on a throwaway Kaggle instance is no more
+    durable than the old file store was.
     """
     mlflow_cfg = config["mlflow"]
 
@@ -149,11 +159,13 @@ def configure_mlflow(config: dict, output_dir: str) -> TrackingInfo:
         except Exception as e:
             logger.warning(f"dagshub.init() failed ({e}); using a local MLFlow store instead")
 
-    local_uri = (Path(output_dir).resolve() / "mlruns").as_uri()
+    out_path = Path(output_dir).resolve()
+    out_path.mkdir(parents=True, exist_ok=True)
+    local_uri = f"sqlite:///{(out_path / 'mlflow.db').as_posix()}"
     mlflow.set_tracking_uri(local_uri)
     mlflow.set_experiment(mlflow_cfg["experiment_name"])
     logger.info(
-        f"MLFlow tracking: local file store at {local_uri}. Set MLFLOW_TRACKING_URI "
+        f"MLFlow tracking: local SQLite store at {local_uri}. Set MLFLOW_TRACKING_URI "
         "(or mlflow.tracking_uri in config.yaml) to log to a remote server instead."
     )
     return TrackingInfo(local_uri, "local")

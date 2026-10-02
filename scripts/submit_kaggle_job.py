@@ -76,7 +76,7 @@ def kernel_slug(config: dict) -> str:
     if not slug:
         raise SystemExit(
             "config.yaml -> kaggle.kernel_slug is not set. "
-            "Set it to '<kaggle_username>/findoc-qlora-train' and update "
+            "Set it to '<kaggle_username>/qlora-fine-tuning-for-sec-extraction' and update "
             "scripts/kaggle_kernel/kernel-metadata.json 'id' to match."
         )
     return slug

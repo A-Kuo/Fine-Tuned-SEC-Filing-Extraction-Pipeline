@@ -127,14 +127,19 @@ class TestConfigureMlflow:
     def test_no_uri_and_no_token_uses_a_local_store_never_dagshub(self, train_module, mlflow_fake, tmp_path, monkeypatch):
         monkeypatch.delenv("DAGSHUB_USER_TOKEN", raising=False)
 
-        info = train_module.configure_mlflow(_config(), str(tmp_path))
+        out_dir = tmp_path / "nested" / "output"  # does not exist yet
+        info = train_module.configure_mlflow(_config(), str(out_dir))
 
         assert info.kind == "local"
         assert not info.registry_capable
         uri = mlflow_fake.get_tracking_uri()
-        assert uri.startswith("file:") and uri.endswith("mlruns")
+        # Not a plain file:// store: newer MLflow puts that backend into
+        # maintenance mode and raises on every use (confirmed on a real
+        # Kaggle run) -- SQLite is the zero-config local fallback instead.
+        assert uri.startswith("sqlite:///") and uri.endswith("mlflow.db")
         assert "dagshub" not in uri
         assert mlflow_fake.called("set_experiment")
+        assert out_dir.is_dir()  # must create the output dir so sqlite has somewhere to write
 
     def test_an_explicit_remote_uri_is_used_and_can_hold_a_registry(self, train_module, mlflow_fake, tmp_path):
         info = train_module.configure_mlflow(_config(tracking_uri="https://mlflow.example.com"), str(tmp_path))
@@ -182,7 +187,7 @@ class TestConfigureMlflow:
         info = train_module.configure_mlflow(_config(), str(tmp_path))
 
         assert info.kind == "local"
-        assert mlflow_fake.get_tracking_uri().startswith("file:")
+        assert mlflow_fake.get_tracking_uri().startswith("sqlite:///")
 
 
 class TestRedactUri:

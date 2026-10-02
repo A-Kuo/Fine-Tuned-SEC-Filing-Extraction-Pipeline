@@ -1,6 +1,6 @@
 {
-  "id": "augustinekuo/findoc-qlora-train",
-  "title": "FinDoc QLoRA Training",
+  "id": "augustinekuo/qlora-fine-tuning-for-sec-extraction",
+  "title": "QLoRA Fine-Tuning for SEC Extraction",
   "code_file": "train_kernel.py",
   "language": "python",
   "kernel_type": "script",

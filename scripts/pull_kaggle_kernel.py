@@ -35,7 +35,7 @@ def _slug_from_config(config: dict, override: str | None) -> str:
     if not slug:
         raise SystemExit(
             "config.yaml -> kaggle.kernel_slug is not set. "
-            "Pass --slug <username>/findoc-qlora-train"
+            "Pass --slug <username>/qlora-fine-tuning-for-sec-extraction"
         )
     return slug
 
