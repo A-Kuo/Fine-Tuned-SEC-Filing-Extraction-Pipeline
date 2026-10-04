@@ -41,6 +41,7 @@ from pathlib import Path
 RUN_MODE = "full"  # rewritten by scripts/submit_kaggle_job.py ("smoke" or "full")
 
 REPO_URL = "https://github.com/A-Kuo/Fine-Tuned-SEC-Filing-Extraction-Pipeline"
+BASE_MODEL = "meta-llama/Llama-3.1-8B"
 REPO_DIR = "/kaggle/working/repo"
 REPORT_DIR = os.environ.get("KERNEL_REPORT_DIR", "/kaggle/working/reports")
 ADAPTER_DIR = "models/llama-sec-v1"
@@ -71,19 +72,92 @@ MODES = {
 }
 
 
-def _load_kaggle_secrets() -> None:
-    """Populate os.environ from Kaggle's UserSecretsClient, if available."""
+def _load_kaggle_secrets() -> dict[str, str]:
+    """Populate os.environ from Kaggle's UserSecretsClient and report, by
+    name only, what happened to each secret (values are never printed).
+
+    This used to swallow every failure silently, so a secret that wasn't
+    attached to the notebook looked identical to one that loaded fine, and the
+    first symptom was a 401 from Hugging Face minutes later.
+    """
     try:
         from kaggle_secrets import UserSecretsClient
-
-        secrets = UserSecretsClient()
-        for key in SECRET_NAMES:
-            try:
-                os.environ[key] = secrets.get_secret(key)
-            except Exception:
-                pass
     except ImportError:
-        pass
+        status = {
+            name: "present in environment" if os.environ.get(name) else "not set"
+            for name in SECRET_NAMES
+        }
+        print("[kernel] secrets: not running on Kaggle; using the existing environment", flush=True)
+    else:
+        status = {}
+        try:
+            client = UserSecretsClient()
+        except Exception as e:
+            client = None
+            status = {name: f"not loaded ({type(e).__name__}: {str(e)[:120]})" for name in SECRET_NAMES}
+        if client is not None:
+            for key in SECRET_NAMES:
+                try:
+                    os.environ[key] = client.get_secret(key)
+                    status[key] = "loaded"
+                except Exception as e:
+                    status[key] = f"not loaded ({type(e).__name__}: {str(e)[:120]})"
+
+    for key, outcome in status.items():
+        print(f"[kernel] secret {key}: {outcome}", flush=True)
+    return status
+
+
+def _http_status(error: Exception) -> int | None:
+    return getattr(getattr(error, "response", None), "status_code", None)
+
+
+def _preflight_hf_access(model_id: str = BASE_MODEL) -> tuple[bool, str]:
+    """Check, in seconds, that the gated base model is reachable -- before the
+    ~5 minutes of pip installs, not after them.
+
+    Returns (ok, message). Only a definite auth/gating failure returns
+    ok=False; a network blip or a missing library returns ok=True with a
+    note, so this can never block a run that would have worked. Tells apart
+    the three real causes: no token at all, a token Hugging Face rejects, and
+    a valid token whose account lacks access to the model.
+    """
+    token = os.environ.get("HF_TOKEN")
+    if not token:
+        return False, (
+            "HF_TOKEN is not set. Add a Hugging Face read token as a Kaggle secret named exactly "
+            "HF_TOKEN and tick it in THIS notebook's Add-ons > Secrets panel (a secret has to be "
+            "attached to each notebook; saving it on the account is not enough)."
+        )
+
+    try:
+        from huggingface_hub import HfApi, hf_hub_download
+    except ImportError:
+        return True, "huggingface_hub is not importable; skipping the access check"
+
+    try:
+        username = HfApi(token=token).whoami().get("name", "unknown")
+    except Exception as e:
+        if _http_status(e) in (401, 403):
+            return False, (
+                "HF_TOKEN was rejected by Hugging Face (invalid, expired or revoked). "
+                "Create a new read token at https://huggingface.co/settings/tokens and update the Kaggle secret."
+            )
+        return True, f"could not verify HF_TOKEN ({type(e).__name__}); continuing"
+
+    try:
+        hf_hub_download(repo_id=model_id, filename="config.json", token=token)
+    except Exception as e:
+        if _http_status(e) in (401, 403) or type(e).__name__ == "GatedRepoError":
+            return False, (
+                f"HF_TOKEN is valid (Hugging Face account '{username}') but that account has no access to "
+                f"{model_id}. Accept the license at https://huggingface.co/{model_id} while signed in as "
+                f"'{username}'. If the token is fine-grained, also enable 'Read access to contents of all "
+                "public gated repos you can access'."
+            )
+        return True, f"could not check access to {model_id} ({type(e).__name__}); continuing"
+
+    return True, f"Hugging Face access OK (account '{username}', {model_id})"
 
 
 def _run(cmd: list[str]) -> None:
@@ -139,7 +213,16 @@ def main(mode: str | None = None) -> None:
         "steps": {},
     }
 
-    _load_kaggle_secrets()
+    report["secrets"] = _load_kaggle_secrets()
+
+    # Fail now, with a specific reason, rather than ~5 minutes into the pip
+    # installs. Both modes need the gated base model, so this is fatal in both.
+    ok, message = _preflight_hf_access()
+    report["steps"]["preflight"] = {"status": "ok" if ok else "failed", "detail": message}
+    print(f"[kernel] preflight: {message}", flush=True)
+    if not ok:
+        _write_report(report)
+        raise SystemExit(f"Preflight failed: {message}")
 
     stage = "setup"
     try:
